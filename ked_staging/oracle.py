@@ -38,6 +38,8 @@ def find_oracle(explicit: Optional[str] = None) -> Optional[List[str]]:
     for path in candidates:
         if not os.path.isfile(path):
             continue
+        if path.lower().endswith(".exe") and os.name != "nt":
+            continue  # Windows 빌드를 다른 OS에서 본 것(예: 리눅스 VM에 붙인 폴더) — 실행할 수 없다
         if path.lower().endswith(".dll"):
             dotnet = shutil.which("dotnet")
             if dotnet:

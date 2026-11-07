@@ -35,10 +35,19 @@ ked-staging-extractor/          ← 이 저장소 (파이썬)
     ease.py        DOTween 이징 표 (ease-golden.json)
     tokens.py      시간 · 거리 토큰 (fr · s · u)
     testbed.py     시험장 — 녹화와 예측의 정렬, 슬롯 어긋남 측정
-    synthetic.py   합성 녹화 (설치 점검)
-  docs/oracle-protocol.md
-  testbed/manifest.example.json
-  RECORDING.md   시험장 녹화 안내
+    synthetic.py   합성 녹화 — P0 설치 점검 · P1 시험 녹화(대사창 · 타자기 · 전이 + 정답)
+    testkit.py     시험용 초상 — 표정 · 변형이 화면으로 구별되는 그림(견본 초상은 모두 같은 그림이다)
+    dialogue.py    대사창 자리(surface-layout) · 합성 녹화용 그리기 · 게임텍스트추출기 프로필
+    lines.py       줄 경계 — 본문 잉크가 지워지는 순간 = 줄 머리
+    gte.py         게임텍스트추출기 결과 엑셀 → 줄마다 화자 · 대사
+    observe.py     관측 — 배경 · 인물(정체 · 변형 · 표정) · 자리(어휘 후보 + move_by) · 반전
+    inverse.py     역해석 — 앞 줄과의 차이 → 정본 커맨드
+    emit.py        출력 — *.staging.json · .yarn
+    pipeline.py    추출 한 번(위 순서대로)
+    evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교
+  docs/oracle-protocol.md · docs/PLAN-P1.md
+  testbed/manifest.example.json · testbed/scenarios/p1_basic.yarn
+  RECORDING.md   실제 런타임 녹화 안내(필요할 때)
 
 ked-story-compositor/src/Vn.StageOracle/   ← 오라클 (.NET, 컴포지터의 Core 사본 · 프리뷰 투영을 그대로 쓴다)
 ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대본 (읽기만)
@@ -59,7 +68,16 @@ ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대
 - [x] 통과 기준 — 합성 녹화를 런타임 원본과 눈으로 대조해 같다고 확인했다(실측 1px 대조는 하지 않았다.
       실제 런타임 녹화로 재려면 [RECORDING.md](RECORDING.md))
 
-**P1 구조 — 다음** · 계획은 [docs/PLAN-P1.md](docs/PLAN-P1.md)
+**P1 구조 — 끝(2026-11-08)** · 계획 · 결과는 [docs/PLAN-P1.md](docs/PLAN-P1.md)
+
+- [x] 시험용 표정 초상(testkit)과 P1 어휘를 고루 쓰는 시험 대본(`testbed/scenarios/p1_basic.yarn`)
+- [x] 시험 녹화: 대사창 · 화자 · 타자기 · 무대 전이 + 정답(줄 머리 · 대사 · 커맨드)
+- [x] 줄 경계: 정답 줄 머리와 1프레임 안
+- [x] 대사: 게임텍스트추출기 결과 엑셀을 줄에 붙인다(프로필도 이 도구가 만든다)
+- [x] 관측 · 역해석 · 출력(staging.json · .yarn)
+- [x] 통과 기준 — 시험 대본 18줄 상태 일치 100%. 실제 게임텍스트추출기를 거쳐도 상태 100%, 대사 글자 정확도 98.6%
+
+**P2 시간과 이징 — 다음**
 
 ## 설치 (Windows)
 
@@ -75,7 +93,13 @@ dotnet build ..\ked-story-compositor\src\Vn.StageOracle -c Release
 # 3) 점검 — 단위 테스트, 합성 녹화로 시험장 도구 확인(약 2~3분)
 py -m unittest discover -s tests -t .
 py -m ked_staging synth-check ..\ked-presentation-runtime\Assets\Dialogue\ChapterProgression\presentation_demo_Demo_Presentation.yarn
+
+# 4) P1 점검 — 시험 녹화 → 추출 → 평가(약 1분)
+py -m ked_staging p1-check
 ```
+
+단위 테스트 일부는 오라클 빌드 · 옆 런타임 저장소 · 한글 글꼴(Windows는 맑은 고딕)이 있어야 돕니다. 없으면 그 테스트만
+건너뜁니다.
 
 ## 사용
 
@@ -91,7 +115,43 @@ py -m ked_staging predict --catalog catalog.json --out predicted `
 py -m ked_staging testbed testbed\manifest.json --catalog catalog.json --out testbed-out
 ```
 
-## 알려진 한계 (P0)
+### 연출 뽑기 (P1)
+
+```powershell
+# 1) 게임텍스트추출기용 프로필 — 런타임 대사창(surface-layout 'bottom') 자리를 비율 좌표로
+py -m ked_staging gte-profile -o ked-runtime.gte-profile.json
+#    → 게임텍스트추출기 profiles 폴더에 넣고, 그 도구로 영상을 돌려 '…_텍스트.xlsx'를 얻는다(번역가가 고친 엑셀도 된다)
+
+# 2) 추출 — 줄 · 대사 · 배경 · 인물 · 표정 · 자리 → extract-out\<영상>.staging.json · <영상>.yarn
+py -m ked_staging extract 영상.mp4 --text 영상_텍스트.xlsx --out extract-out
+
+# 시험 녹화를 직접 만들어 보기 — 표정이 구별되는 시험용 초상을 testkit 폴더에 만들어 쓴다
+py -m ked_staging scenario testbed\scenarios\p1_basic.yarn --testkit testkit --out scenario-out
+py -m ked_staging extract scenario-out\scenario.mp4 --text scenario-out\gte-simulated.xlsx --testkit testkit --out extract-out
+py -m ked_staging evaluate scenario-out\truth.json extract-out\scenario.staging.json
+```
+
+`scenario`는 `gte-simulated.xlsx`(정답에서 흉내 낸 엑셀)와 `gte-profile.json`도 함께 냅니다. 실제 게임텍스트추출기를
+`scenario.mp4`에 돌린 엑셀을 `--text`로 주면 OCR까지 거친 결과를 잴 수 있습니다.
+
+`.staging.json`은 줄마다 줄 머리 · 다 찍힘 · 끝(초), 화자 · 대사 · 붙은 엑셀 줄, 관측(배경 · 인물마다 자리 후보 이름 ·
+move_by · 오차), 낸 커맨드, 확인할 까닭을 담습니다. `.yarn`은 같은 내용을 대본 모양으로 편 초안이고, 확인할 까닭은
+`// 확인:` 주석으로 붙습니다.
+
+## 알려진 한계
+
+**P1**
+
+- 시간 인자는 생략값입니다(숨은 채 바꾸는 자리 0fr · 보이는 채 12fr · 등퇴장 18fr · 배경 24fr). 실제 길이와 이징은 P2에서 잽니다.
+- 자리는 `place_left/center/right × focus(bust · face) × size 프리셋`의 조합 + `move_by`(0.25u 단위)로만 설명합니다.
+  `place`(임의 지점) · 회전 · 배율 · 샷 · 모션 · 캐릭터 비주얼 · 화면 효과는 P3입니다. 그런 줄은 `// 확인: 설명 못 한 화면 n%`가 붙습니다.
+- 인물은 한 슬롯에 한 명(런타임 cast 규칙), 층은 언제나 `mid`로 냅니다(샷이 없으면 화면에 차이가 없습니다).
+- 같은 깊이의 두 인물이 겹칠 때 그리기 순서(슬롯 키 순)가 원본과 다를 수 있습니다(`sibling_*`는 P3).
+- 반투명 `fade`(0과 1 사이)는 보지 않습니다. 보이거나 안 보이거나입니다.
+- 대사창 bottom 프리셋을 가정합니다(`--preset`으로 바꿀 수 있지만 줄 안에서 프리셋이 바뀌는 영상은 아직 다루지 않습니다).
+- 시험장 검증은 합성 녹화(오라클 예측 그대로)로 했습니다. 실제 런타임 녹화의 압축 · 트윈 중간 프레임에서는 더 흔들릴 수 있습니다.
+
+**P0**
 
 - 예측 화면은 코어가 접는 어휘만 반영합니다. `mirror`는 컴포지터 규칙으로 따라가지만, 캐릭터 비주얼 · 화면 효과 · 블러 · `tx` 마스크 · `sibling_*`는 반영하지 않습니다. 그런 줄은 시험장에서 어긋나 보일 수 있습니다.
 - 정착 상태(트윈이 끝난 뒤)만 예측합니다. 시간 축은 P2입니다.

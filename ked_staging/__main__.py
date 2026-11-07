@@ -5,6 +5,12 @@
   testbed     시험장 매니페스트의 녹화마다 정렬 · 어긋남을 재서 P0 통과 여부를 낸다
   synth-check 합성 녹화를 만들어 testbed가 제대로 도는지 확인한다(설치 점검)
 
+  scenario    yarn 경로로 P1 시험 녹화(대사창 · 타자기 · 전이)와 정답(truth.json)을 만든다
+  extract     영상(+ 게임텍스트추출기 엑셀)에서 줄 · 대사 · 연출을 뽑아 staging.json · .yarn을 낸다
+  evaluate    extract 결과를 정답과 줄마다 비교한다(P1 통과 기준: 상태 일치 95%)
+  p1-check    scenario → extract → evaluate를 한 번에(P1 점검)
+  gte-profile 게임텍스트추출기용 게임 프로필(대사창 자리)을 낸다
+
 런타임 저장소는 --runtime(기본: 이 저장소 옆의 ked-presentation-runtime)이다.
 """
 from __future__ import annotations
@@ -143,6 +149,126 @@ def cmd_synth_check(args) -> int:
     return 0 if good else 1
 
 
+def _catalog_for(args, runtime: str) -> Catalog:
+    """--catalog(파일) · --testkit(시험용 표정 초상) · 기본(런타임 원본) 순."""
+    if getattr(args, "testkit", None):
+        from .testkit import build_test_catalog
+        return build_test_catalog(import_runtime(runtime), args.testkit)
+    return _catalog(args, runtime)
+
+
+def _size(text: str):
+    w, h = text.lower().split("x")
+    return int(w), int(h)
+
+
+def cmd_scenario(args) -> int:
+    from .dialogue import BoxLayout, gte_profile
+    from .gte import rows_from_truth, write_like_gte
+    from .synthetic import write_scenario
+    runtime, tuning, motions = _runtime_paths(args.runtime)
+    cat = _catalog_for(args, runtime)
+    os.makedirs(args.out, exist_ok=True)
+    layout = BoxLayout.from_tuning(tuning, preset=args.preset)
+    video = os.path.join(args.out, "scenario.mp4")
+    t0 = time.time()
+    with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
+        lines = route_lines(oracle.fold_yarn(args.yarn))
+        truth = write_scenario(video, lines, cat, (oracle.width, oracle.height), layout, size=_size(args.size),
+                               fps=args.fps, seed=args.seed, route=args.yarn)
+    with open(os.path.join(args.out, "truth.json"), "w", encoding="utf-8") as f:
+        json.dump(truth, f, ensure_ascii=False, indent=1)
+    with open(os.path.join(args.out, "gte-profile.json"), "w", encoding="utf-8") as f:
+        json.dump(gte_profile(layout), f, ensure_ascii=False, indent=2)
+    write_like_gte(os.path.join(args.out, "gte-simulated.xlsx"), rows_from_truth(truth))
+    print(f"줄 {len(truth['lines'])} · {truth['duration']:.1f}초 · {time.time() - t0:.0f}초 걸림 → {args.out}")
+    print("  scenario.mp4 · truth.json · gte-profile.json(게임텍스트추출기 프로필) · gte-simulated.xlsx(정답에서 흉내 낸 엑셀)")
+    return 0
+
+
+def cmd_extract(args) -> int:
+    from .pipeline import extract
+    runtime, tuning, motions = _runtime_paths(args.runtime)
+    cat = _catalog_for(args, runtime)
+    t0 = time.time()
+    with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
+        extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset)
+    print(f"{time.time() - t0:.0f}초")
+    return 0
+
+
+def _print_report(report: dict) -> None:
+    print(f"줄 {report['matched']}/{report['truthLines']} 짝지음(추출 {report['gotLines']}) · 머리 최대 "
+          f"{report['headFramesMax']}프레임")
+    print(f"상태 일치 {report['stateMatch'] * 100:.1f}% · 화자 {report['speakerMatch'] * 100:.1f}% · "
+          f"대사 완전 일치 {report['textExact'] * 100:.1f}% · 글자 정확도 {report['charAccuracy'] * 100:.1f}%")
+    for row in report["lines"]:
+        if row["state"] or row["text"]:
+            what = "; ".join(row["state"])
+            if row["text"]:
+                what += f" 대사: {row['text']['got']!r}"
+            print(f"  정답 줄 {row['truth']}: {what}")
+    if report["missed"]:
+        print(f"  못 찾은 정답 줄: {report['missed']}")
+    if report["extra"]:
+        print(f"  더 나온 줄: {report['extra']}")
+    print("P1 통과" if report["pass"] else "P1 미통과")
+
+
+def cmd_evaluate(args) -> int:
+    from .evaluate import evaluate, load_json
+    runtime, tuning, motions = _runtime_paths(args.runtime)
+    truth, staging = load_json(args.truth), load_json(args.staging)
+    with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
+        report = evaluate(truth, staging, oracle, args.tolerance)
+    _print_report(report)
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=1)
+    return 0 if report["pass"] else 1
+
+
+def cmd_p1_check(args) -> int:
+    from .dialogue import BoxLayout
+    from .evaluate import evaluate
+    from .gte import rows_from_truth, write_like_gte
+    from .pipeline import extract
+    from .synthetic import write_scenario
+    from .testkit import build_test_catalog
+    runtime, tuning, motions = _runtime_paths(args.runtime)
+    os.makedirs(args.out, exist_ok=True)
+    cat = build_test_catalog(import_runtime(runtime), os.path.join(args.out, "testkit"))
+    yarn = args.yarn or [os.path.join(_REPO, "testbed", "scenarios", "p1_basic.yarn")]
+    layout = BoxLayout.from_tuning(tuning)
+    video = os.path.join(args.out, "scenario.mp4")
+    t0 = time.time()
+    with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
+        lines = route_lines(oracle.fold_yarn(yarn))
+        truth = write_scenario(video, lines, cat, (oracle.width, oracle.height), layout, size=_size(args.size),
+                               route=yarn)
+        xlsx = write_like_gte(os.path.join(args.out, "gte-simulated.xlsx"), rows_from_truth(truth))
+        print(f"시험 녹화: 줄 {len(lines)} · {truth['duration']:.1f}초")
+        staging = extract(video, oracle, cat, tuning, args.out, xlsx, node="P1_Check", log=lambda m: None)
+        report = evaluate(truth, staging, oracle)
+    with open(os.path.join(args.out, "truth.json"), "w", encoding="utf-8") as f:
+        json.dump(truth, f, ensure_ascii=False, indent=1)
+    with open(os.path.join(args.out, "report.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=1)
+    _print_report(report)
+    print(f"{time.time() - t0:.0f}초 · 결과 {args.out}")
+    return 0 if report["pass"] else 1
+
+
+def cmd_gte_profile(args) -> int:
+    from .dialogue import BoxLayout, gte_profile
+    _, tuning, _ = _runtime_paths(args.runtime)
+    layout = BoxLayout.from_tuning(tuning, preset=args.preset)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(gte_profile(layout), f, ensure_ascii=False, indent=2)
+    print(f"게임텍스트추출기 프로필 → {args.output} (프로필 폴더에 넣고 선택하세요)")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m ked_staging", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -176,6 +302,50 @@ def main(argv=None) -> int:
     p.add_argument("--catalog")
     p.add_argument("--out", default="synth-check-out")
     p.set_defaults(func=cmd_synth_check)
+
+    p = sub.add_parser("scenario", help="P1 시험 녹화와 정답 만들기")
+    p.add_argument("yarn", nargs="+")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--catalog")
+    p.add_argument("--testkit", metavar="DIR", help="표정이 구별되는 시험용 초상을 DIR에 만들어 쓴다")
+    p.add_argument("--out", default="scenario-out")
+    p.add_argument("--size", default="1920x1080")
+    p.add_argument("--fps", type=float, default=30.0)
+    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--preset", default="bottom", help="대사창 surface-layout 프리셋")
+    p.set_defaults(func=cmd_scenario)
+
+    p = sub.add_parser("extract", help="영상에서 연출 뽑기")
+    p.add_argument("video")
+    p.add_argument("--text", help="게임텍스트추출기 결과 엑셀(.xlsx)")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--catalog")
+    p.add_argument("--testkit", metavar="DIR", help="시험용 초상(scenario와 같은 DIR)")
+    p.add_argument("--out", default="extract-out")
+    p.add_argument("--node", default="Extracted")
+    p.add_argument("--preset", default="bottom")
+    p.set_defaults(func=cmd_extract)
+
+    p = sub.add_parser("evaluate", help="추출 결과를 정답과 비교")
+    p.add_argument("truth")
+    p.add_argument("staging")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--tolerance", type=float, default=6.0, help="자리 허용(px)")
+    p.add_argument("--report")
+    p.set_defaults(func=cmd_evaluate)
+
+    p = sub.add_parser("p1-check", help="P1 점검(시험 녹화 → 추출 → 평가)")
+    p.add_argument("yarn", nargs="*")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--out", default="p1-check-out")
+    p.add_argument("--size", default="1920x1080")
+    p.set_defaults(func=cmd_p1_check)
+
+    p = sub.add_parser("gte-profile", help="게임텍스트추출기 프로필 내기")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--preset", default="bottom")
+    p.add_argument("-o", "--output", default="ked-runtime.gte-profile.json")
+    p.set_defaults(func=cmd_gte_profile)
 
     args = parser.parse_args(argv)
     try:

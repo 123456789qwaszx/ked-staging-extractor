@@ -1,0 +1,87 @@
+title: P1_Basic
+---
+// P1 시험장 대본 — 구조 어휘(배경 · 등장 · 퇴장 · 자리 · 크기 · 표정 · 변형 · 반전 · 이동)를 고루 쓴다.
+// 그림은 런타임 견본(하린 · 시구레 · 카스미, 교실 배경)이고, 시험장은 표정이 구별되는 시험용 초상으로 그린다.
+<<shot_reset 0fr>>
+<<bg_spawn bg_main class_day>>
+<<slot s1 stage00 mid>>
+<<cast s1 harin a 1>>
+<<slot s2 stage00 mid>>
+<<cast s2 sigure a 1>>
+<<slot s3 stage00 mid>>
+<<cast s3 kasmi a 1>>
+
+<<bg_fade_in bg_main 24fr>>
+아침 교실은 아직 조용하다. 창문으로 햇살이 길게 들어온다.
+
+<<place_center s1 bust 0fr>>
+<<size s1 mid bust 0fr>>
+<<fade_in s1 18fr>>
+하린: 좋은 아침! 오늘은 일찍 왔네.
+
+<<face s1 2>>
+하린: 어제 말한 포스터, 밤새 다 그려 왔어.
+
+<<place_left s1 bust 12fr>>
+<<place_right s2 bust 0fr>>
+<<size s2 mid bust 0fr>>
+<<fade_in s2 14fr>>
+시구레: 정말요? 저는 아직 반밖에 못 했어요.
+
+<<face s2 3>>
+시구레: 색칠이 생각보다 오래 걸려서요.
+
+<<face s1 4>>
+하린: 괜찮아, 같이 하면 금방이야.
+
+<<size s2 front bust 12fr>>
+시구레: 그럼 점심시간에 미술실로 갈게요.
+
+<<mirror s1 left>>
+<<face s1 5>>
+하린: 어? 저기 누가 온다.
+
+<<place_center s3 bust 0fr>>
+<<size s3 back bust 0fr>>
+<<fade_in s3 18fr>>
+카스미: 둘이서 무슨 얘기 하고 있었어?
+
+<<mirror s1 right>>
+<<face s1 1>>
+하린: 축제 준비 얘기. 너도 같이 할래?
+
+<<fade_out s2 18fr>>
+<<move_by s1 -2u 0u 12fr>>
+카스미: 좋아. 나는 간판 글씨를 맡을게.
+
+<<pose s1 b>>
+하린: 그럼 나는 옷부터 갈아입고 올게.
+
+<<fade_out s1 18fr>>
+<<fade_out s3 18fr>>
+<<bg_sprite bg_main class_lunch>>
+점심시간이 되자 교실이 금세 시끌벅적해졌다.
+
+<<place_left s2 face 0fr>>
+<<size s2 mid face 0fr>>
+<<pose s2 b>>
+<<face s2 2>>
+<<fade_in s2 14fr>>
+시구레: 다들 어디 갔지? 아까까지 여기 있었는데.
+
+<<place_right s1 bust 0fr>>
+<<size s1 front bust 0fr>>
+<<fade_in s1 18fr>>
+하린: 여기! 옷 갈아입고 왔어.
+
+<<face s2 4>>
+시구레: 와, 잘 어울려요. 축제 날에도 그거 입어요?
+
+<<face s1 3>>
+하린: 음... 그건 좀 더 생각해 볼게.
+
+<<bg_fade_out bg_main 24fr>>
+<<fade_out s1 18fr>>
+<<fade_out s2 18fr>>
+그날 오후, 간판은 무사히 완성되었다.
+===
