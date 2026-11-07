@@ -90,12 +90,14 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
                    layout, size: Tuple[int, int] = (1920, 1080), fps: float = 30.0, cps: float = 24.0,
                    hold: float = 0.9, hold_jitter: float = 0.4, lead_in: float = 0.6, tail: float = 0.8,
                    noise: float = 2.0, seed: int = 7, font_path: Optional[str] = None,
-                   route: Sequence[str] = ()) -> dict:
+                   route: Sequence[str] = (), oracle=None) -> dict:
     """오라클이 접은 줄들(route_lines)로 대사창 · 타자기 · 무대 전이가 있는 녹화를 쓰고 정답을 돌려준다.
 
-    줄 머리(head)에 앞 줄 본문이 지워지고 이름이 바뀌며, 무대는 그 줄 커맨드의 가장 긴 시간 동안 앞 화면에서
-    새 화면으로 넘어간다(OutCubic 크로스페이드 — 실제 트윈 모양은 P2에서 오라클 시간 축으로 바꾼다).
-    본문은 cps 글자/초로 찍히고, 다 찍히고 무대도 정착한 뒤 hold(+흔들림)만큼 머문다.
+    줄 머리(head)에 앞 줄 본문이 지워지고 이름이 바뀌며 무대가 움직이기 시작한다.
+    - oracle을 주면 무대는 오라클 시간 축(timeline)대로 움직인다 — 커맨드마다 제 시작 · 길이 · 이징, 대기(pause),
+      페이드 투명도까지 런타임 규칙 그대로다(P2). 정답에 줄마다 그 시간표(schedule)가 붙는다.
+    - 없으면 커맨드의 가장 긴 시간 동안 앞 화면에서 새 화면으로 OutCubic 크로스페이드한다(P1).
+    본문은 cps 글자/초로 찍히고, 다 찍히고 무대도 정착한 뒤 hold(+흔들림)만큼 머문다(다음 줄 머리의 트윈 가속을 피한다).
     """
     from .dialogue import BoxPainter, split_speaker
     rng = np.random.default_rng(seed)
@@ -103,9 +105,13 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
     box = layout.scaled(w, h)
     painter = BoxPainter(box, font_path)
     scale = w / float(oracle_size[0])
-    stages = [render(l["snapshot"], catalog, oracle_size[0], oracle_size[1], scale=scale).astype(np.float32)
-              for l in lines]
-    black = np.zeros((h, w, 3), np.float32)
+
+    def draw(snapshot) -> np.ndarray:
+        return render(snapshot, catalog, oracle_size[0], oracle_size[1], scale=scale)
+
+    stages = [draw(l["snapshot"]) for l in lines]          # uint8 — 긴 경로에서도 메모리를 아낀다
+    black = np.zeros((h, w, 3), np.uint8)
+    commands = [l.get("commands", []) for l in lines]
 
     # 시간표
     plan = []
@@ -113,12 +119,21 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
     for i, line in enumerate(lines):
         speaker, body = split_speaker(line.get("text") or "")
         same = i > 0 and np.array_equal(stages[i], stages[i - 1])
-        trans = 0.0 if same else transition_seconds(line.get("commands", []))
+        schedule = None
+        if oracle is not None:
+            tl = oracle.timeline(commands[:i + 1], [])
+            schedule = tl["schedule"]
+            trans = 0.0 if same else float(tl["end"])
+        else:
+            trans = 0.0 if same else transition_seconds(line.get("commands", []))
         typed = len(body) / cps
         end = t + max(trans, typed) + hold + float(rng.uniform(0, hold_jitter))
-        plan.append({"index": i, "node": line.get("node"), "lineId": line.get("lineId"), "text": line.get("text"),
-                     "speaker": speaker, "body": body, "commands": line.get("commands", []),
-                     "head": t, "settle": t + trans, "typed": t + typed, "end": end, "transition": trans})
+        entry = {"index": i, "node": line.get("node"), "lineId": line.get("lineId"), "text": line.get("text"),
+                 "speaker": speaker, "body": body, "commands": line.get("commands", []),
+                 "head": t, "settle": t + trans, "typed": t + typed, "end": end, "transition": trans}
+        if schedule is not None:
+            entry["schedule"] = schedule
+        plan.append(entry)
         t = end
     total = t + tail
 
@@ -128,23 +143,33 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
     bank = [rng.normal(0, noise, (h, w, 3)).astype(np.float32) for _ in range(6)] if noise > 0 else None
     n_frames = int(np.ceil(total * fps))
     k = -1
+    moving: Dict[int, np.ndarray] = {}      # 지금 줄의 움직이는 프레임(프레임 번호 → 그림)
     for n in range(n_frames):
         t = n / fps
         while k + 1 < len(plan) and t >= plan[k + 1]["head"] - 1e-9:
             k += 1
-        if k < 0 or t >= plan[-1]["end"]:
-            stage = black if k < 0 else stages[-1]
-            frame = stage
-            boxed = False
+            moving = {}
+            p = plan[k]
+            if oracle is not None and p["transition"] > 0:
+                ns = [m for m in range(n, n_frames) if m / fps < p["settle"]]
+                tl = oracle.timeline(commands[:k + 1], [m / fps - p["head"] for m in ns])
+                moving = {m: draw(snap) for m, snap in zip(ns, tl["snapshots"])}
+        boxed = not (k < 0 or t >= plan[-1]["end"])
+        if k < 0:
+            frame = black
+        elif not boxed:
+            frame = stages[-1]
         else:
             p = plan[k]
             prev = stages[k - 1] if k > 0 else black
-            if p["transition"] > 0 and t < p["settle"]:
+            if n in moving:
+                frame = moving[n]
+            elif oracle is None and p["transition"] > 0 and t < p["settle"]:
                 e = _out_cubic((t - p["head"]) / p["transition"])
-                frame = prev * (1 - e) + stages[k] * e
+                frame = prev.astype(np.float32) * (1 - e) + stages[k].astype(np.float32) * e
             else:
                 frame = stages[k]
-            boxed = True
+        frame = frame.astype(np.float32)
         if bank is not None:
             frame = frame + bank[n % len(bank)]
         img = np.clip(frame + 0.5, 0, 255).astype(np.uint8)
@@ -156,4 +181,4 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
     writer.release()
     return {"schema": SCENARIO_SCHEMA, "video": os.path.abspath(path), "fps": fps, "size": [w, h],
             "cps": cps, "duration": total, "route": [os.path.abspath(r) for r in route],
-            "catalog": catalog.source, "boxPreset": layout.preset, "lines": plan}
+            "catalog": catalog.source, "boxPreset": layout.preset, "timed": oracle is not None, "lines": plan}

@@ -128,3 +128,87 @@ def evaluate(truth: dict, staging: dict, oracle: Oracle, tolerance: float = 6.0)
 def load_json(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+# ── P2: 시간 · 이징 ───────────────────────────────────────────
+
+TIMING_PASS_DURATION = 0.9   # 길이 오차 2fr 안에 든 흐름 비율
+TIMING_PASS_EASE = 0.8       # 움직임 흐름의 이징 일치 비율
+_ALPHA = {"fade_in", "fade_out", "fade", "bg_fade_in", "bg_fade_out"}
+
+
+def _who(snapshot: Snapshot) -> Dict[str, str]:
+    """슬롯 키 → 누구(인물 이름 · 배경은 'bg')."""
+    out = {}
+    for s in snapshot.slots:
+        out[s["key"]] = "bg" if s.get("background") else (s.get("character") or s["key"])
+    return out
+
+
+def _tweens(schedule: Sequence[dict], before: Snapshot, after: Snapshot) -> Dict[Tuple[str, str], List[dict]]:
+    """시간표에서 보이는 흐름만 — (누구, 'alpha' | 'move') → 항목들."""
+    who_b, who_a = _who(before), _who(after)
+    vis_b = {s["key"] for s in before.visible_slots(0.5)}
+    vis_a = {s["key"] for s in after.visible_slots(0.5)}
+    out: Dict[Tuple[str, str], List[dict]] = {}
+    for e in schedule:
+        if e.get("wait") or float(e.get("duration", 0)) <= 0 or not (e.get("tween") or e.get("fade")):
+            continue
+        key = (e.get("args") or [""])[0]
+        kind = "alpha" if e["name"] in _ALPHA else "move"
+        if kind == "move" and (key not in vis_b or key not in vis_a):
+            continue
+        who = who_a.get(key) or who_b.get(key) or key
+        out.setdefault((who, kind), []).append(e)
+    return out
+
+
+def evaluate_timing(truth: dict, staging: dict, oracle: Oracle, tolerance_frames: float = 2.0) -> dict:
+    fps = 24.0
+    truth_lines = truth["lines"]
+    if not all("schedule" in l for l in truth_lines):
+        raise ValueError("정답에 시간표가 없습니다 — 시험 녹화를 오라클 시간 축으로 만드세요(scenario --timed)")
+    truth_snaps = [l["snapshot"] for l in route_lines(oracle.fold_yarn(truth["route"]))]
+    got_lines = staging["lines"]
+    got_cmds = [list(staging["header"]) + list(got_lines[0]["commands"])] + [list(l["commands"]) for l in got_lines[1:]]
+    got_snaps = [l["snapshot"] for l in route_lines(oracle.fold_yarn([staging["files"]["yarn"]]))]
+    pairs = match_lines([l["head"] for l in truth_lines], [l["head"] for l in got_lines])
+    rows = []
+    total = dur_ok = start_ok = 0
+    ease_total = ease_ok = 0
+    for ti, gi in pairs:
+        t_before = truth_snaps[ti - 1] if ti else Snapshot([], {}, [])
+        g_before = got_snaps[gi - 1] if gi else Snapshot([], {}, [])
+        want = _tweens(truth_lines[ti]["schedule"], t_before, truth_snaps[ti])
+        got_schedule = oracle.timeline(got_cmds[:gi + 1], [])["schedule"]
+        have = _tweens(got_schedule, g_before, got_snaps[gi])
+        for (who, kind), entries in want.items():
+            for e in entries:
+                total += 1
+                cands = have.get((who, kind), [])
+                if not cands:
+                    rows.append({"truth": ti, "who": who, "kind": kind, "command": e["name"], "problem": "없음"})
+                    continue
+                g = min(cands, key=lambda c: abs(float(c["duration"]) - float(e["duration"])))
+                dd = round((float(g["duration"]) - float(e["duration"])) * fps, 3)
+                ds = round((float(g["start"]) - float(e["start"])) * fps, 3)
+                dur_ok += abs(dd) <= tolerance_frames
+                start_ok += abs(ds) <= tolerance_frames
+                same_ease = kind == "alpha" or (g.get("ease") or "OutCubic").lower() == (e.get("ease") or "OutCubic").lower()
+                if kind == "move":
+                    ease_total += 1
+                    ease_ok += same_ease
+                if abs(dd) > tolerance_frames or abs(ds) > tolerance_frames or not same_ease:
+                    rows.append({"truth": ti, "who": who, "kind": kind, "command": e["name"],
+                                 "want": [round(float(e["start"]) * fps), round(float(e["duration"]) * fps), e.get("ease")],
+                                 "got": [round(float(g["start"]) * fps), round(float(g["duration"]) * fps), g.get("ease")]})
+    report = {
+        "tweens": total,
+        "durationWithin": dur_ok / total if total else 1.0,
+        "startWithin": start_ok / total if total else 1.0,
+        "easeMatch": ease_ok / ease_total if ease_total else 1.0,
+        "moveTweens": ease_total,
+        "problems": rows,
+    }
+    report["pass"] = report["durationWithin"] >= TIMING_PASS_DURATION and report["easeMatch"] >= TIMING_PASS_EASE
+    return report

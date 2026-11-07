@@ -34,6 +34,8 @@ MIN_GAIN_PER_PIXEL = 6.0      # 인물을 더할 때 덮은 픽셀당 줄어야 
 KEEP_ERROR = 7.0              # 앞 줄 인물이 그대로라고 볼 영역 평균 오차
 TOP_K = 6
 UNEXPLAINED_SKIP = 0.01       # 설명 못 한 화면이 이 비율보다 적으면 인물을 더 찾지 않는다
+CANONICAL_SNAP_PX = 8.0       # 이동 없는 어휘 자리로 바꿔 부를 허용(캔버스 px)
+TRACK_REACH = 128            # 앞 줄 인물을 따라갈 때 평행 이동 범위(분석 px)
 SHIFT_REACH = 48             # 평행 이동 탐색 범위(분석 px, 1/4 배율이면 화면 192px)
 
 
@@ -420,10 +422,11 @@ class Observer:
                                   reach, layer)
         return float(bx), float(by)
 
-    def _refine(self, frame: np.ndarray, base: np.ndarray, fits: List[_Fit], fit: _Fit, pos: int) -> _Fit:
+    def _refine(self, frame: np.ndarray, base: np.ndarray, fits: List[_Fit], fit: _Fit, pos: int,
+                reach: int = SHIFT_REACH) -> _Fit:
         """평행 이동을 재서 move_by(u)를 정한다 — 피라미드 ECC, 결과는 unit_step 단위로 반올림."""
         move = np.array(fit.move, np.float64)
-        sx, sy = self._shift_search(frame, base, fits, fit, pos)
+        sx, sy = self._shift_search(frame, base, fits, fit, pos, reach)
         if sx or sy:
             du, dv = fit.placement.units_for(sx / self.scale, sy / self.scale)
             move = move + [du, dv]
@@ -450,6 +453,33 @@ class Observer:
             q = np.round(move / self.unit_step) * self.unit_step
             fit = self._make_fit(fit.character, fit.variant, fit.entry, fit.placement, fit.mirror,
                                  (float(q[0]), float(q[1])))
+        return fit
+
+    def _track(self, frame: np.ndarray, base: np.ndarray, fits: List[_Fit], lost: _Fit
+               ) -> Optional[Tuple[_Fit, int]]:
+        """앞 줄 인물을 같은 자리 어휘 · 반전 그대로 넓게 밀어 찾는다. 잘 맞으면 (맞춘 것, 끼울 자리)."""
+        cand = self._make_fit(lost.character, lost.variant, lost.entry, lost.placement, lost.mirror, lost.move)
+        pos = self._order_index(fits, cand)[-1]
+        fit = self._refine(frame, base, fits, cand, pos, TRACK_REACH)
+        model = self._compose(base, fits[:pos] + [fit] + fits[pos:])
+        vis = (fit.alpha > 0.95) & (self.mask > 0)
+        for g in fits[pos:]:
+            vis &= g.alpha < 0.05
+        if vis.sum() < 200 or float(robust_error(frame, model)[vis].mean()) > KEEP_ERROR * 1.6:
+            return None
+        if fit.move == lost.move:
+            return None   # 제자리에서 안 맞던 것 — 다른 변화(표정 · 크기 …)다
+        return self._canonical(fit), pos
+
+    def _canonical(self, fit: _Fit) -> _Fit:
+        """옮겨 찾은 자리가 이동 없는 어휘 자리(place × focus × size)와 같으면 그 이름으로 — 대본은 move_by보다 place가 읽기 쉽다."""
+        quad = fit.quad
+        tol = CANONICAL_SNAP_PX
+        for pl in self.cands.placements(fit.character, fit.variant):
+            if np.abs(pl.quad - quad).max() <= tol:
+                if pl is fit.placement and fit.move == (0.0, 0.0):
+                    return fit
+                return self._make_fit(fit.character, fit.variant, fit.entry, pl, fit.mirror, (0.0, 0.0))
         return fit
 
     def _choose_emotion(self, frame: np.ndarray, base: np.ndarray, fits: List[_Fit], i: int,
@@ -513,8 +543,12 @@ class Observer:
                     if vis.sum() < 50:
                         continue
                     if float(err[vis].mean()) > KEEP_ERROR * 1.6:
-                        fits.pop(i)
+                        lost = fits.pop(i)
                         changed = True
+                        # 같은 자리 어휘에서 옮겨졌을 뿐인가(move_by) — 넓게 따라가 본다.
+                        tracked = self._track(frame, base, fits, lost)
+                        if tracked is not None:
+                            fits.insert(tracked[1], tracked[0])
                         break
 
         # 남은 오차를 인물로 설명한다(탐욕). 설명 못 한 화면이 거의 없으면 찾지 않는다.

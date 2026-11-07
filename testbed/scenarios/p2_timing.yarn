@@ -1,0 +1,56 @@
+title: P2_Timing
+---
+// P2 시험장 대본 — 같은 구조 어휘에 시간 · 이징 · 대기를 고루 준다(보이는 채 움직이는 것, 페이드, 배경 페이드, pause).
+<<shot_reset 0fr>>
+<<bg_spawn bg_main class_day>>
+<<slot s1 stage00 mid>>
+<<cast s1 harin a 1>>
+<<slot s2 stage00 mid>>
+<<cast s2 sigure a 1>>
+<<slot s3 stage00 mid>>
+<<cast s3 kasmi a 1>>
+
+<<bg_fade_in bg_main 30fr>>
+종이 울리기 전, 교실에는 아직 아무도 없었다.
+
+<<place_center s1 bust 0fr>>
+<<size s1 mid bust 0fr>>
+<<fade_in s1 10fr>>
+하린: 일찍 온 보람이 있네. 아무도 없어.
+
+<<place_left s1 bust 20fr InOutSine>>
+<<place_right s2 bust 0fr>>
+<<size s2 mid bust 0fr>>
+<<fade_in s2 16fr>>
+시구레: 아니요, 저 여기 있어요.
+
+<<face s1 4>>
+<<move_by s1 -2u 0u 16fr Linear>>
+하린: 깜짝이야! 언제부터 거기 있었어?
+
+<<size s2 front bust 30fr OutBack>>
+시구레: 처음부터요. 창가 자리에서 책 읽고 있었어요.
+
+<<face s1 2>>
+<<place_left s1 bust 24fr InOutQuad>>
+하린: 그럼 마침 잘됐다. 포스터 좀 같이 봐 줄래?
+
+<<pause 12fr>>
+<<place_center s3 bust 0fr>>
+<<size s3 back bust 0fr>>
+<<fade_in s3 20fr>>
+카스미: 나도 볼래. 무슨 포스터야?
+
+<<fade_out s2 8fr>>
+<<size s1 front bust 18fr OutQuart>>
+하린: 축제 포스터! 시구레는 잠깐 선생님한테 갔어.
+
+<<face s3 1>>
+<<move_by s1 3u 0u 28fr InOutCubic>>
+카스미: 색이 예쁘다. 글씨는 내가 다시 써 줄게.
+
+<<fade_out s1 12fr>>
+<<fade_out s3 24fr>>
+<<bg_fade_out bg_main 36fr>>
+그렇게 아침 시간이 조용히 흘러갔다.
+===

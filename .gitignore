@@ -8,6 +8,7 @@ __pycache__/
 /scenario-out/
 /extract-out/
 /p1-check-out/
+/p2-check-out/
 *.gte-profile.json
 catalog.json
 # 다른 게임 영상 · 카탈로그는 저장소에 넣지 않는다(규칙 9)

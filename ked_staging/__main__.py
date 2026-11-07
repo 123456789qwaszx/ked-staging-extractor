@@ -9,6 +9,7 @@
   extract     영상(+ 게임텍스트추출기 엑셀)에서 줄 · 대사 · 연출을 뽑아 staging.json · .yarn을 낸다
   evaluate    extract 결과를 정답과 줄마다 비교한다(P1 통과 기준: 상태 일치 95%)
   p1-check    scenario → extract → evaluate를 한 번에(P1 점검)
+  p2-check    시간 축 시험 녹화 → extract → 상태 · 시간 · 이징 평가(P2 점검)
   gte-profile 게임텍스트추출기용 게임 프로필(대사창 자리)을 낸다
 
 런타임 저장소는 --runtime(기본: 이 저장소 옆의 ked-presentation-runtime)이다.
@@ -175,7 +176,8 @@ def cmd_scenario(args) -> int:
     with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
         lines = route_lines(oracle.fold_yarn(args.yarn))
         truth = write_scenario(video, lines, cat, (oracle.width, oracle.height), layout, size=_size(args.size),
-                               fps=args.fps, seed=args.seed, route=args.yarn)
+                               fps=args.fps, seed=args.seed, route=args.yarn,
+                               oracle=oracle if args.timed else None)
     with open(os.path.join(args.out, "truth.json"), "w", encoding="utf-8") as f:
         json.dump(truth, f, ensure_ascii=False, indent=1)
     with open(os.path.join(args.out, "gte-profile.json"), "w", encoding="utf-8") as f:
@@ -192,7 +194,8 @@ def cmd_extract(args) -> int:
     cat = _catalog_for(args, runtime)
     t0 = time.time()
     with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
-        extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset)
+        extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset,
+                timing=not args.no_timing)
     print(f"{time.time() - t0:.0f}초")
     return 0
 
@@ -213,6 +216,13 @@ def _print_report(report: dict) -> None:
     if report["extra"]:
         print(f"  더 나온 줄: {report['extra']}")
     print("P1 통과" if report["pass"] else "P1 미통과")
+    tm = report.get("timing")
+    if tm:
+        print(f"시간: 흐름 {tm['tweens']} · 길이 2fr 안 {tm['durationWithin'] * 100:.1f}% · 시작 2fr 안 "
+              f"{tm['startWithin'] * 100:.1f}% · 이징 일치 {tm['easeMatch'] * 100:.1f}%(움직임 {tm['moveTweens']})")
+        for p in tm["problems"]:
+            print(f"  정답 줄 {p['truth']} {p['who']} {p['kind']} {p['command']}: 정답 {p.get('want')} · 추출 {p.get('got', p.get('problem'))}")
+        print("P2 통과" if tm["pass"] else "P2 미통과")
 
 
 def cmd_evaluate(args) -> int:
@@ -221,11 +231,14 @@ def cmd_evaluate(args) -> int:
     truth, staging = load_json(args.truth), load_json(args.staging)
     with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
         report = evaluate(truth, staging, oracle, args.tolerance)
+        if truth.get("timed"):
+            from .evaluate import evaluate_timing
+            report["timing"] = evaluate_timing(truth, staging, oracle)
     _print_report(report)
     if args.report:
         with open(args.report, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=1)
-    return 0 if report["pass"] else 1
+    return 0 if report["pass"] and report.get("timing", {"pass": True})["pass"] else 1
 
 
 def cmd_p1_check(args) -> int:
@@ -248,7 +261,8 @@ def cmd_p1_check(args) -> int:
                                route=yarn)
         xlsx = write_like_gte(os.path.join(args.out, "gte-simulated.xlsx"), rows_from_truth(truth))
         print(f"시험 녹화: 줄 {len(lines)} · {truth['duration']:.1f}초")
-        staging = extract(video, oracle, cat, tuning, args.out, xlsx, node="P1_Check", log=lambda m: None)
+        staging = extract(video, oracle, cat, tuning, args.out, xlsx, node="P1_Check", log=lambda m: None,
+                          timing=False)
         report = evaluate(truth, staging, oracle)
     with open(os.path.join(args.out, "truth.json"), "w", encoding="utf-8") as f:
         json.dump(truth, f, ensure_ascii=False, indent=1)
@@ -257,6 +271,38 @@ def cmd_p1_check(args) -> int:
     _print_report(report)
     print(f"{time.time() - t0:.0f}초 · 결과 {args.out}")
     return 0 if report["pass"] else 1
+
+
+def cmd_p2_check(args) -> int:
+    from .dialogue import BoxLayout
+    from .evaluate import evaluate, evaluate_timing
+    from .gte import rows_from_truth, write_like_gte
+    from .pipeline import extract
+    from .synthetic import write_scenario
+    from .testkit import build_test_catalog
+    runtime, tuning, motions = _runtime_paths(args.runtime)
+    os.makedirs(args.out, exist_ok=True)
+    cat = build_test_catalog(import_runtime(runtime), os.path.join(args.out, "testkit"))
+    yarn = args.yarn or [os.path.join(_REPO, "testbed", "scenarios", "p2_timing.yarn")]
+    layout = BoxLayout.from_tuning(tuning)
+    video = os.path.join(args.out, "scenario.mp4")
+    t0 = time.time()
+    with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
+        lines = route_lines(oracle.fold_yarn(yarn))
+        truth = write_scenario(video, lines, cat, (oracle.width, oracle.height), layout, size=_size(args.size),
+                               route=yarn, oracle=oracle)
+        xlsx = write_like_gte(os.path.join(args.out, "gte-simulated.xlsx"), rows_from_truth(truth))
+        print(f"시험 녹화(시간 축): 줄 {len(lines)} · {truth['duration']:.1f}초")
+        staging = extract(video, oracle, cat, tuning, args.out, xlsx, node="P2_Check", log=lambda m: None)
+        report = evaluate(truth, staging, oracle)
+        report["timing"] = evaluate_timing(truth, staging, oracle)
+    with open(os.path.join(args.out, "truth.json"), "w", encoding="utf-8") as f:
+        json.dump(truth, f, ensure_ascii=False, indent=1)
+    with open(os.path.join(args.out, "report.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=1)
+    _print_report(report)
+    print(f"{time.time() - t0:.0f}초 · 결과 {args.out}")
+    return 0 if report["pass"] and report["timing"]["pass"] else 1
 
 
 def cmd_gte_profile(args) -> int:
@@ -313,6 +359,7 @@ def main(argv=None) -> int:
     p.add_argument("--fps", type=float, default=30.0)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--preset", default="bottom", help="대사창 surface-layout 프리셋")
+    p.add_argument("--timed", action="store_true", help="무대를 오라클 시간 축대로 움직인다(P2 — 정답에 시간표가 붙는다)")
     p.set_defaults(func=cmd_scenario)
 
     p = sub.add_parser("extract", help="영상에서 연출 뽑기")
@@ -324,6 +371,7 @@ def main(argv=None) -> int:
     p.add_argument("--out", default="extract-out")
     p.add_argument("--node", default="Extracted")
     p.add_argument("--preset", default="bottom")
+    p.add_argument("--no-timing", action="store_true", help="시간 · 이징을 재지 않는다(P1 결과만)")
     p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("evaluate", help="추출 결과를 정답과 비교")
@@ -340,6 +388,13 @@ def main(argv=None) -> int:
     p.add_argument("--out", default="p1-check-out")
     p.add_argument("--size", default="1920x1080")
     p.set_defaults(func=cmd_p1_check)
+
+    p = sub.add_parser("p2-check", help="P2 점검(시간 축 시험 녹화 → 추출 → 상태 · 시간 평가)")
+    p.add_argument("yarn", nargs="*")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--out", default="p2-check-out")
+    p.add_argument("--size", default="1920x1080")
+    p.set_defaults(func=cmd_p2_check)
 
     p = sub.add_parser("gte-profile", help="게임텍스트추출기 프로필 내기")
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)

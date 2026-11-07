@@ -15,7 +15,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-PROTOCOL = "1"
+PROTOCOL = "2"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_HERE)
 
@@ -133,6 +133,35 @@ class Oracle:
         """커맨드 열(줄마다 [{name, args}])을 처음 상태에서 접는다 — 후보 커맨드를 시험할 때 쓴다."""
         res = self.request({"op": "fold", "lines": [{"commands": list(cmds)} for cmds in lines]})
         return [Snapshot.from_json(s) for s in res["snapshots"]]
+
+    def timeline(self, lines: Sequence[Sequence[Dict[str, Any]]], times: Sequence[float],
+                 line: Optional[int] = None) -> Dict[str, Any]:
+        """줄 하나의 시간 축 — lines를 처음 상태에서 접되 line번째(기본 마지막) 줄은 times(줄 머리부터 초)마다
+        스냅샷을 뜬다. → {schedule: [{index, name, args, start, duration, ease, wait, tween, fade}], end, snapshots}"""
+        req: Dict[str, Any] = {"op": "timeline", "lines": [{"commands": list(c)} for c in lines],
+                               "times": [float(t) for t in times]}
+        if line is not None:
+            req["line"] = int(line)
+        res = self.request(req)
+        res["snapshots"] = [Snapshot.from_json(s) for s in res["snapshots"]]
+        return res
+
+    def commands(self) -> Dict[str, Dict[str, Any]]:
+        """커맨드 카탈로그(이름 → {id, parameters: [{name, type, required, default}]}). 인자 자리 = 파라미터 순서."""
+        if not hasattr(self, "_commands"):
+            res = self.request({"op": "commands"})
+            self._commands = {c["name"]: c for c in res["commands"]}
+        return self._commands
+
+    def param_index(self, command: str, type_name: str) -> Optional[int]:
+        """command의 type_name(예: "duration" · "ease") 파라미터가 몇 번째 인자인가."""
+        info = self.commands().get(command)
+        if not info:
+            return None
+        for i, p in enumerate(info["parameters"]):
+            if p.get("type") == type_name:
+                return i
+        return None
 
     def close(self) -> None:
         if self._proc.poll() is None:

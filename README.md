@@ -44,7 +44,8 @@ ked-staging-extractor/          ← 이 저장소 (파이썬)
     inverse.py     역해석 — 앞 줄과의 차이 → 정본 커맨드
     emit.py        출력 — *.staging.json · .yarn
     pipeline.py    추출 한 번(위 순서대로)
-    evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교
+    timing.py      시간과 이징 — 흐름마다 진행도 재기 · (시작, 길이, 이징) 맞추기 · pause 끼우기
+    evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교(상태 · 대사 · 시간)
   docs/oracle-protocol.md · docs/PLAN-P1.md
   testbed/manifest.example.json · testbed/scenarios/p1_basic.yarn
   RECORDING.md   실제 런타임 녹화 안내(필요할 때)
@@ -77,7 +78,14 @@ ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대
 - [x] 관측 · 역해석 · 출력(staging.json · .yarn)
 - [x] 통과 기준 — 시험 대본 18줄 상태 일치 100%. 실제 게임텍스트추출기를 거쳐도 상태 100%, 대사 글자 정확도 98.6%
 
-**P2 시간과 이징 — 다음**
+**P2 시간과 이징 — 끝(2026-11-08)** · 방법 · 결과는 [docs/P2.md](docs/P2.md)
+
+- [x] 오라클 `timeline` — 줄 안의 시간 축(커맨드마다 시작 · 길이 · 이징, 대기, 페이드 투명도). 컴포지터 `StageMotionPlan.ApplyAt`
+- [x] 시험 녹화를 실제 트윈으로(`scenario --timed`), 정답에 줄마다 시간표
+- [x] 흐름(움직임 · 투명도)마다 진행도를 영상에서 재고 (시작 · 길이 · 이징 35종)을 맞춘다, 늦은 시작은 `pause`
+- [x] 통과 기준 — `p2_timing.yarn`(10줄, 흐름 14)과 `p1_basic.yarn`(흐름 15)에서 길이 2fr 안 100%, 시작 2fr 안 100%, 이징 일치 100%
+
+**P3 남은 어휘 — 다음**
 
 ## 설치 (Windows)
 
@@ -94,9 +102,12 @@ dotnet build ..\ked-story-compositor\src\Vn.StageOracle -c Release
 py -m unittest discover -s tests -t .
 py -m ked_staging synth-check ..\ked-presentation-runtime\Assets\Dialogue\ChapterProgression\presentation_demo_Demo_Presentation.yarn
 
-# 4) P1 점검 — 시험 녹화 → 추출 → 평가(약 1분)
+# 4) P1 · P2 점검 — 시험 녹화 → 추출 → 평가(각 1~2분)
 py -m ked_staging p1-check
+py -m ked_staging p2-check
 ```
+
+오라클 프로토콜이 2로 올랐습니다(P2). 컴포지터를 받은 뒤 2)의 빌드를 다시 해 주세요.
 
 단위 테스트 일부는 오라클 빌드 · 옆 런타임 저장소 · 한글 글꼴(Windows는 맑은 고딕)이 있어야 돕니다. 없으면 그 테스트만
 건너뜁니다.
@@ -125,8 +136,8 @@ py -m ked_staging gte-profile -o ked-runtime.gte-profile.json
 # 2) 추출 — 줄 · 대사 · 배경 · 인물 · 표정 · 자리 → extract-out\<영상>.staging.json · <영상>.yarn
 py -m ked_staging extract 영상.mp4 --text 영상_텍스트.xlsx --out extract-out
 
-# 시험 녹화를 직접 만들어 보기 — 표정이 구별되는 시험용 초상을 testkit 폴더에 만들어 쓴다
-py -m ked_staging scenario testbed\scenarios\p1_basic.yarn --testkit testkit --out scenario-out
+# 시험 녹화를 직접 만들어 보기 — 표정이 구별되는 시험용 초상을 testkit 폴더에 만들어 쓴다(--timed: 실제 트윈)
+py -m ked_staging scenario testbed\scenarios\p2_timing.yarn --timed --testkit testkit --out scenario-out
 py -m ked_staging extract scenario-out\scenario.mp4 --text scenario-out\gte-simulated.xlsx --testkit testkit --out extract-out
 py -m ked_staging evaluate scenario-out\truth.json extract-out\scenario.staging.json
 ```
@@ -135,14 +146,24 @@ py -m ked_staging evaluate scenario-out\truth.json extract-out\scenario.staging.
 `scenario.mp4`에 돌린 엑셀을 `--text`로 주면 OCR까지 거친 결과를 잴 수 있습니다.
 
 `.staging.json`은 줄마다 줄 머리 · 다 찍힘 · 끝(초), 화자 · 대사 · 붙은 엑셀 줄, 관측(배경 · 인물마다 자리 후보 이름 ·
-move_by · 오차), 낸 커맨드, 확인할 까닭을 담습니다. `.yarn`은 같은 내용을 대본 모양으로 편 초안이고, 확인할 까닭은
+move_by · 오차), 흐름마다 잰 시간(`timing`: 시작 · 길이 프레임 · 이징 · 맞춤 오차), 낸 커맨드, 확인할 까닭을 담습니다.
+시간을 재지 않으려면 `extract --no-timing`. `.yarn`은 같은 내용을 대본 모양으로 편 초안이고, 확인할 까닭은
 `// 확인:` 주석으로 붙습니다.
 
 ## 알려진 한계
 
+**P2**
+
+- 시간은 보이는 변화만 잽니다 — 보이는 채 바뀐 자리(움직임)와 페이드. 숨은 채 놓는 자리는 `0fr`, 즉시 커맨드(face · pose ·
+  mirror · bg_sprite)는 줄 머리에 둡니다(대기 뒤의 즉시 커맨드는 아직 줄 머리로 당겨집니다).
+- 한 슬롯의 여러 움직임(place와 size를 다른 시간으로)은 하나의 흐름으로 잽니다.
+- 다음 줄 머리에서 남은 트윈이 가속되므로(클레임 ×30) 줄을 빨리 넘긴 영상에서는 길이가 짧게 잡힐 수 있습니다 — 맞춤 오차가
+  크면 `// 확인`이 붙습니다.
+- OutQuart · OutQuint처럼 꼬리만 다른 이징은 짧은 흐름에서 헷갈릴 수 있습니다.
+
 **P1**
 
-- 시간 인자는 생략값입니다(숨은 채 바꾸는 자리 0fr · 보이는 채 12fr · 등퇴장 18fr · 배경 24fr). 실제 길이와 이징은 P2에서 잽니다.
+- 슬라이드(`slide_in`)는 place + fade_in으로 냅니다(등장하며 움직이는 것은 P3).
 - 자리는 `place_left/center/right × focus(bust · face) × size 프리셋`의 조합 + `move_by`(0.25u 단위)로만 설명합니다.
   `place`(임의 지점) · 회전 · 배율 · 샷 · 모션 · 캐릭터 비주얼 · 화면 효과는 P3입니다. 그런 줄은 `// 확인: 설명 못 한 화면 n%`가 붙습니다.
 - 인물은 한 슬롯에 한 명(런타임 cast 규칙), 층은 언제나 `mid`로 냅니다(샷이 없으면 화면에 차이가 없습니다).

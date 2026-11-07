@@ -122,7 +122,9 @@ def build_script(stages: Sequence[ObservedStage]) -> Script:
             depth_changed = s.depth != a.depth
             # place는 앞 이동(move_by)을 지우고 focus를 화면 지점에 세운다. size는 focus를 지키며 키우므로
             # 이동이 남아 있을 때 크기만 바꾸면 처음부터 세운 자리와 달라진다 → 그때는 다시 세운다.
-            replace = first or place_changed or (s.depth != a.depth and (a.move != (0.0, 0.0) or s.move != (0.0, 0.0)))
+            replace = (first or place_changed
+                       or (s.depth != a.depth and (a.move != (0.0, 0.0) or s.move != (0.0, 0.0)))
+                       or (s.move == (0.0, 0.0) and a.move != (0.0, 0.0)))   # 이동을 거두는 것은 place로(대본 관례)
             if replace:
                 cmds.append(_cmd(f"place_{s.place}", a.slot, s.focus, dur))
                 if first or depth_changed:

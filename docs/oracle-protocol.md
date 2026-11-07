@@ -1,4 +1,4 @@
-# ked-stage-oracle 프로토콜 (1)
+# ked-stage-oracle 프로토콜 (2)
 
 오라클은 ked-story-compositor 저장소의 `src/Vn.StageOracle` 콘솔 프로그램이다. 무대 계산은 런타임 코어
 (`Ked.Presentation.Core`, 컴포지터가 반입한 사본)가, 화면 투영은 컴포지터 프리뷰와 같은
@@ -20,6 +20,11 @@ ked-stage-oracle selftest --tuning <dir> [--motions <file>] <file.yarn>...
 | `groups` | `path` 또는 `text`(+`source`) | `nodes[{name, groups[{text, lineId, commands[{name, args}]}]}]` · `warnings` |
 | `foldYarn` | `paths[]`(재생 순서) 또는 `path`/`text`, `continuous`(기본 false), `node`(선택) | `width` · `height` · `nodes[{name, source, lines[{index, text, lineId, commands, snapshot}]}]` |
 | `fold` | `lines[{commands[{name, args[]}]}]` | `snapshots[]` — 줄마다 하나, 처음 상태에서 접는다 |
+| `timeline` | `lines[…]`(fold와 같다), `line`(기본 마지막), `times[]`(그 줄 머리부터 초) | `schedule[]` · `end` · `snapshots[]`(times마다, `time` 포함) |
+| `commands` | — | `commands[{id, name, parameters[{name, type, required, default}]}]` — 컴포지터 기본 카탈로그 |
+
+**2 (P2)**: `timeline` · `commands`가 생겼다. 1과 응답 모양은 같고 op만 늘었지만, 추출기가 버전을 확인하므로
+오라클을 다시 빌드해야 한다.
 
 `continuous`면 노드 경계에서 무대를 비우지 않는다 — 녹화한 재생 경로처럼 앞 노드의 `slot` · `cast`를
 이어 쓰는 대본을 따라갈 때 쓴다.
@@ -49,6 +54,27 @@ ked-stage-oracle selftest --tuning <dir> [--motions <file>] <file.yarn>...
 ```
 
 좌표는 캔버스(기준 해상도, 좌상 원점 · y 아래)다. 스냅샷은 정착 상태(트윈이 모두 끝난 뒤)다.
+
+## timeline — 줄 하나의 시간 축
+
+앞 줄들은 정착까지 접고, `line`번째 줄은 `times`마다 그 순간의 스냅샷을 뜬다. 런타임 규칙 그대로다.
+
+- 줄의 커맨드는 줄 머리에서 함께 시작한다. 대기(`pause` · `<<Nfr>>`)만 뒤 커맨드를 그만큼 늦춘다(전경은 대기뿐).
+- 노드 · 카메라 트윈(보간 · 이징 · 슬라이드 튐 · 같은 노드는 뒤의 것이 이김)은 컴포지터 `StageMotionPlan`이 낸다
+  (`ApplyAt`이 커맨드마다 다른 시작을 받는다).
+- 페이드 투명도는 제 시간 · OutCubic(런타임 `FadeCommandCharR` 생략값)으로 흐른다.
+- 즉시 커맨드(face · pose · mirror · bg_sprite · 0fr 배치)는 제 시작 시각에 바뀐다.
+- 시간 · 이징 인자는 컴포지터 기본 카탈로그(`docs/game.definition.json`, 런타임 등록 표와 교차 검증)의 파라미터
+  형(`duration` · `ease`)으로 찾는다 — 파서 표를 베끼지 않는다.
+
+```json
+"schedule": [
+  {"index": 0, "name": "place_left", "args": ["s1","bust","20fr","InOutSine"], "start": 0, "duration": 0.8333,
+   "ease": "InOutSine", "wait": false, "tween": true, "fade": false},
+  {"index": 4, "name": "pause", "args": ["12fr"], "start": 0, "duration": 0.5, "ease": null, "wait": true, ...},
+  {"index": 5, "name": "fade_in", "args": ["s3","20fr"], "start": 0.5, "duration": 0.8333, "ease": "OutCubic", "fade": true, ...}
+]
+```
 
 ## 코어가 접지 않는 것
 
