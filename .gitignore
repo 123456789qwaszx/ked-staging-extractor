@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+/predicted/
+/testbed-out/
+/synth-check-out/
+/recordings/
+catalog.json
+# 다른 게임 영상 · 카탈로그는 저장소에 넣지 않는다(규칙 9)
+/private/

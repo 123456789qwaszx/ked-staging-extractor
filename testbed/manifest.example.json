@@ -1,0 +1,19 @@
+{
+  "schema": "ked-staging-testbed/1",
+  "runtime": "../../ked-presentation-runtime",
+  "recordings": [
+    {
+      "video": "../recordings/demo_presentation.mp4",
+      "route": ["Assets/Dialogue/ChapterProgression/presentation_demo_Demo_Presentation.yarn"],
+      "note": "데모 노드 전체 — 대부분의 어휘가 나온다"
+    },
+    {
+      "video": "../recordings/festival_classroom_remake.mp4",
+      "route": [
+        "Assets/Dialogue/ChapterProgression/festival_eve_Festival_Classroom.yarn",
+        "Assets/Dialogue/ChapterProgression/festival_eve_Festival_Remake.yarn"
+      ],
+      "note": "교실 → '처음부터 다시 그린다' 선택"
+    }
+  ]
+}
