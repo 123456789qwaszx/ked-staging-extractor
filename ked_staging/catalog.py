@@ -124,6 +124,9 @@ class Catalog:
         if data.get("schema") != SCHEMA:
             raise ValueError(f"{SCHEMA} 형식이 아닙니다: {data.get('schema')!r}")
         root = data.get("root") or os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(root):
+            # 다른 컴퓨터로 옮긴 카탈로그 — 경로는 catalog.json 폴더 기준의 상대 경로다.
+            root = os.path.dirname(os.path.abspath(path))
         cat = cls(data["source"], root)
         cat.portraits = [Portrait(p["character"], p["variant"], p["emotion"], p["path"], tuple(p["size"]),
                                   tuple(p["opaqueBox"])) for p in data.get("portraits", [])]
