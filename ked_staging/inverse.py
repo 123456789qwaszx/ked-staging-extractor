@@ -44,6 +44,7 @@ class _Actor:
     depth: str = "mid"
     move: Tuple[float, float] = (0.0, 0.0)
     mirror: bool = False
+    extras: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -77,11 +78,20 @@ def build_script(stages: Sequence[ObservedStage]) -> Script:
 
     bg_sprite = first_bg
     bg_visible = False
+    shot = None
     out_lines: List[List[dict]] = []
     out_notes: List[List[str]] = []
     for st in stages:
         cmds: List[dict] = []
         notes: List[str] = []
+        # 카메라 — 줄의 맨 앞(무대 전체가 함께 움직인다)
+        if st.shot != shot:
+            if st.shot is None:
+                cmds.append(_cmd("shot_reset", MOVE))
+            else:
+                zoom, x, y = st.shot
+                cmds.append(_cmd("shot_to", f"{zoom:g}", _units(x), _units(y), MOVE))
+            shot = st.shot
         # 배경
         if st.background and not bg_visible:
             if st.background != bg_sprite:
@@ -139,6 +149,16 @@ def build_script(stages: Sequence[ObservedStage]) -> Script:
                 dx, dy = s.move[0] - a.move[0], s.move[1] - a.move[1]
                 cmds.append(_cmd("move_by", a.slot, _units(dx), _units(dy), dur))
                 a.move = s.move
+            if s.extras != a.extras:
+                gained = [m for m in s.extras if m not in a.extras]
+                if len(gained) == len(s.extras) - len(a.extras) and all(m in s.extras for m in a.extras):
+                    cmds += [_cmd("motion", a.slot, m) for m in gained]
+                else:
+                    # commit 모션이 남긴 자세를 거둔다 — 샘플 모션(bow)은 초상 회전이라 char_rotate_to 0으로 되돌린다.
+                    cmds.append(_cmd("char_rotate_to", a.slot, "0", SNAP if appearing else MOVE))
+                    cmds += [_cmd("motion", a.slot, m) for m in s.extras]
+                    notes.append(f"{s.character}: 남은 자세(commit 모션)를 char_rotate_to 0으로 거뒀습니다 — 확인")
+                a.extras = s.extras
             if appearing:
                 cmds.append(_cmd("fade_in", a.slot, APPEAR))
                 a.visible = True

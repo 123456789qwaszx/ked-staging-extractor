@@ -64,6 +64,8 @@ ked-stage-oracle selftest --tuning <dir> [--motions <file>] <file.yarn>...
   (`ApplyAt`이 커맨드마다 다른 시작을 받는다).
 - 페이드 투명도는 제 시간 · OutCubic(런타임 `FadeCommandCharR` 생략값)으로 흐른다.
 - 즉시 커맨드(face · pose · mirror · bg_sprite · 0fr 배치)는 제 시작 시각에 바뀐다.
+- 모션(`motion slot name [mode]`)은 클립 길이 동안 채널 값을 코어 `MotionMath.Compose`로 노드에 얹는다(호스트 샘플러와 같은
+  함수). 끝난 뒤는 폴드 상태 그대로다(restore는 시작값, commit은 끝값). 일정의 `duration`은 클립 길이(P3).
 - 시간 · 이징 인자는 컴포지터 기본 카탈로그(`docs/game.definition.json`, 런타임 등록 표와 교차 검증)의 파라미터
   형(`duration` · `ease`)으로 찾는다 — 파서 표를 베끼지 않는다.
 
@@ -80,5 +82,6 @@ ked-stage-oracle selftest --tuning <dir> [--motions <file>] <file.yarn>...
 
 폴드 어휘 밖의 커맨드는 `unhandled`로 온다 — 오디오(`bgm` · `sfx` · `voice`), 화면 효과(`screen_*`),
 블러(`screen_blur` · `focus_on`), 캐릭터 비주얼(`char_visual_*`), 전환 마스크(`tx`), `sibling_*`,
-Yarn 제어(`if` · `detour` …). 예측 화면은 이것들을 반영하지 않는다. `mirror`만은 화면에 크게 드러나서
+Yarn 제어(`if` · `detour` …). 예측 화면은 이것들을 반영하지 않는다. 화면 효과 · 캐릭터 비주얼은 추출기가 근사 모양으로
+따로 그리고 알아본다(`effects.py`, [P3.md](P3.md)). `mirror`만은 화면에 크게 드러나서
 컴포지터 프리뷰와 같은 규칙(`MiniStageFold.ResolveMirror`)으로 따라간다.

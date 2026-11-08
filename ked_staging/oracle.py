@@ -163,6 +163,13 @@ class Oracle:
                 return i
         return None
 
+    def param_default(self, command: str, type_name: str) -> Optional[str]:
+        """command의 type_name 파라미터 생략값(예: char_visual_clear의 duration → "6fr")."""
+        i = self.param_index(command, type_name)
+        if i is None:
+            return None
+        return self.commands()[command]["parameters"][i].get("default")
+
     def close(self) -> None:
         if self._proc.poll() is None:
             try:

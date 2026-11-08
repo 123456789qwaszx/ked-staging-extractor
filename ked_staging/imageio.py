@@ -26,9 +26,12 @@ def read_image(path: str, alpha: bool = False) -> Optional[np.ndarray]:
     return img
 
 
-def write_image(path: str, img: np.ndarray) -> None:
+def write_image(path: str, img: np.ndarray, params: Optional[list] = None) -> None:
     ext = os.path.splitext(path)[1] or ".png"
-    ok, buf = cv2.imencode(ext, img)
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    ok, buf = cv2.imencode(ext, img, params or [])
     if not ok:
         raise IOError(f"이미지를 인코딩하지 못했습니다: {path}")
     tmp = path + ".tmp" + ext

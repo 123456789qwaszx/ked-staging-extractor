@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 from .oracle import Oracle, Snapshot, route_lines
 
 STATE_PASS = 0.95
@@ -211,4 +213,153 @@ def evaluate_timing(truth: dict, staging: dict, oracle: Oracle, tolerance_frames
         "problems": rows,
     }
     report["pass"] = report["durationWithin"] >= TIMING_PASS_DURATION and report["easeMatch"] >= TIMING_PASS_EASE
+    return report
+
+
+# ── P3: 남은 어휘 ─────────────────────────────────────────────
+
+VOCAB_PASS = 0.9
+_SHOT_NAMES = {"shot_to", "shot_zoom", "shot_track", "shot_reset", "shot_focus_to"}
+
+
+def families(commands: Sequence[dict], header: bool = False) -> set:
+    """줄 커맨드 → 어휘 갈래(카메라 · 모션 이름 · 슬라이드 · 캐릭터 비주얼 · 화면 효과). 머리의 샷 초기화는 뺀다."""
+    out = set()
+    for c in commands:
+        n = c["name"]
+        if n in _SHOT_NAMES:
+            if header and n == "shot_reset":
+                continue
+            out.add("shot")
+        elif n == "motion" and len(c.get("args", [])) > 1:
+            out.add(f"motion:{c['args'][1]}")
+        elif n in ("slide_in", "slide_out"):
+            out.add(n)
+        elif n.startswith("char_visual"):
+            out.add(n)
+        elif n.startswith("screen_") and not n.endswith("_clear") and not n.endswith("_reset"):
+            out.add(n)
+    return out
+
+
+def evaluate_vocab(truth: dict, staging: dict) -> dict:
+    truth_lines = truth["lines"]
+    got_lines = staging["lines"]
+    pairs = match_lines([l["head"] for l in truth_lines], [l["head"] for l in got_lines])
+    want_n = got_n = hit = 0
+    rows = []
+    for ti, gi in pairs:
+        w = families(truth_lines[ti]["commands"], header=ti == 0)
+        g = families(got_lines[gi]["commands"])
+        want_n += len(w)
+        got_n += len(g)
+        hit += len(w & g)
+        if w != g:
+            rows.append({"truth": ti, "missing": sorted(w - g), "extra": sorted(g - w)})
+    report = {"wanted": want_n, "found": got_n, "hit": hit,
+              "recall": hit / want_n if want_n else 1.0, "precision": hit / got_n if got_n else 1.0,
+              "problems": rows}
+    report["pass"] = report["recall"] >= VOCAB_PASS and report["precision"] >= VOCAB_PASS
+    return report
+
+
+# ── P4: 모르는 카탈로그 — 이름을 맞춰 보고 견준다 ──────────────────
+
+UNKNOWN_IOU = 0.85        # 무대 안에 보이는 그림 모양(α)이 이만큼 겹쳐야 자리가 같다
+
+
+def _visible_masks(snap: Snapshot, catalog, painter, rows: int):
+    """보이는 인물마다 (인물, 변형, 표정, 무대 안 α>0.5 가림) — 분석 배율, 대사창 위만."""
+    out = []
+    for s in snap.visible_slots(0.5):
+        if s.get("background") or not s.get("character") or not s.get("quad"):
+            continue
+        entry = catalog.portrait(s["character"], s.get("variant") or "a", s.get("emotion") or "")
+        if entry is None:
+            continue
+        _, alpha = painter.layer(entry, np.asarray(s["quad"], np.float64), bool(s.get("toolMirror")))
+        m = alpha > 0.5
+        m[rows:] = False
+        if m.sum() >= 30:
+            out.append((s["character"], s.get("variant") or "a", s.get("emotion") or "", m))
+    return out
+
+
+def evaluate_unknown(truth: dict, staging: dict, oracle: Oracle, truth_catalog, got_catalog,
+                     stage_bottom: float, min_iou: float = UNKNOWN_IOU) -> dict:
+    """영상에서 배운 카탈로그(이름이 c01 · 01 …)로 뽑은 결과를 정답과 견준다(P4).
+
+    두 카탈로그의 그림은 여백 · 크기가 달라 화면 사각형으로는 못 견준다. 줄마다 대사창 위에 실제로 보이는 인물 모양(α)을
+    그려 가장 많이 겹치는 것끼리 짝짓고, 짝을 모아 다수결로 이름 대응(뽑은 인물 → 정답 인물, (뽑은 인물, 표정) →
+    (정답 인물, 표정), 뽑은 배경 → 정답 배경)을 정한다. 순도: 그 대응을 따르는 짝의 비율.
+    줄 일치: 대응으로 바꿔 읽은 배경 · 인물 · 표정이 같고, 짝마다 모양이 min_iou 이상 겹친다."""
+    from collections import Counter, defaultdict
+    from .observe import ANALYSIS_SCALE, Painter
+    size = (int(round(oracle.width * ANALYSIS_SCALE)), int(round(oracle.height * ANALYSIS_SCALE)))
+    rows = int(stage_bottom * ANALYSIS_SCALE)
+    tpaint, gpaint = Painter(truth_catalog, size, ANALYSIS_SCALE), Painter(got_catalog, size, ANALYSIS_SCALE)
+    truth_snaps = [l["snapshot"] for l in route_lines(oracle.fold_yarn(truth["route"]))]
+    got_snaps = [l["snapshot"] for l in route_lines(oracle.fold_yarn([staging["files"]["yarn"]]))]
+    pairs = match_lines([l["head"] for l in truth["lines"]], [l["head"] for l in staging["lines"]])
+
+    def iou(a, b):
+        return float((a & b).sum()) / max(1, int((a | b).sum()))
+
+    matched_rows = []
+    who, face, bgs = defaultdict(Counter), defaultdict(Counter), defaultdict(Counter)
+    for ti, gi in pairs:
+        tb, _ = _visible(truth_snaps[ti])
+        gb, _ = _visible(got_snaps[gi])
+        if gb is not None:
+            bgs[gb][tb] += 1
+        tp = _visible_masks(truth_snaps[ti], truth_catalog, tpaint, rows)
+        gp = _visible_masks(got_snaps[gi], got_catalog, gpaint, rows)
+        used = set()
+        links = []
+        for g in gp:
+            best = None
+            for k, t in enumerate(tp):
+                if k in used:
+                    continue
+                v = iou(g[3], t[3])
+                if v > 0.3 and (best is None or v > best[0]):
+                    best = (v, k)
+            if best is not None:
+                used.add(best[1])
+                t = tp[best[1]]
+                links.append((g, t, best[0]))
+                who[g[0]][t[0]] += 1
+                face[(g[0], g[1], g[2])][(t[0], t[1], t[2])] += 1
+        matched_rows.append((ti, gi, tb, gb, tp, gp, links))
+    char_map = {g: c.most_common(1)[0][0] for g, c in who.items()}
+    face_map = {g: c.most_common(1)[0][0] for g, c in face.items()}
+    bg_map = {g: c.most_common(1)[0][0] for g, c in bgs.items()}
+    total = sum(sum(c.values()) for c in who.values())
+    identity = sum(c.most_common(1)[0][1] for c in who.values()) / total if total else 0.0
+    expression = sum(c.most_common(1)[0][1] for c in face.values()) / total if total else 0.0
+    ok = 0
+    rows = []
+    for ti, gi, tb, gb, tp, gp, links in matched_rows:
+        problems = []
+        if (bg_map.get(gb) if gb is not None else None) != tb:
+            problems.append(f"배경 {tb} ≠ {gb}")
+        if len(tp) != len(gp) or len(links) != len(tp):
+            problems.append(f"인물 수 {len(tp)} ≠ {len(gp)}")
+        for g, t, v in links:
+            if face_map.get((g[0], g[1], g[2])) != (t[0], t[1], t[2]):
+                problems.append(f"{t[0]}/{t[1]}/{t[2]} ≠ {g[0]}/{g[1]}/{g[2]}")
+            if v < min_iou:
+                problems.append(f"{t[0]} 모양 겹침 {v:.2f}")
+        ok += not problems
+        rows.append({"truth": ti, "got": gi, "state": problems})
+    n = len(truth["lines"])
+    ious = [v for *_, links in matched_rows for _, _, v in links]
+    report = {"truthLines": n, "matched": len(pairs), "lineMatch": ok / n if n else 0.0,
+              "meanIoU": round(float(np.mean(ious)), 4) if ious else 0.0,
+              "identityPurity": round(identity, 4), "expressionPurity": round(expression, 4),
+              "characters": {g: t for g, t in sorted(char_map.items())},
+              "expressions": {"/".join(g): "/".join(t) for g, t in sorted(face_map.items())},
+              "backgrounds": {g: t for g, t in sorted(bg_map.items())},
+              "lines": rows}
+    report["pass"] = identity >= 1.0 and expression >= 0.95 and report["lineMatch"] >= 0.9
     return report

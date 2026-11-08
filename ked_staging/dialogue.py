@@ -58,6 +58,30 @@ class BoxLayout:
                        float(entry.get("lineFontSize", 36.0)) * s, float(entry.get("nameFontSize", 28.0)) * s, preset)
         raise KeyError(f"surface-layout에 '{preset}' 프리셋이 없습니다: {path}")
 
+    @classmethod
+    def from_gte_profile(cls, path: str, width: int = 1920, height: int = 1080) -> "BoxLayout":
+        """게임텍스트추출기 프로필(다른 게임, P4) — 'area' 영역을 본문 자리로, 'speaker' 영역을 이름 자리로 쓴다.
+        글자 크기는 모르므로 본문 자리 높이의 1/4(세 줄 + 여백)로 어림한다."""
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        area = speaker = None
+        for r in data.get("regions", []):
+            if r.get("type") == "area" and area is None:
+                area = r["rect"]
+            elif r.get("type") == "speaker" and speaker is None:
+                speaker = r["rect"]
+        if area is None:
+            raise KeyError(f"프로필에 'area' 영역이 없습니다: {path}")
+
+        def rect(r) -> Rect:
+            return (r[0] * width, r[1] * height, r[2] * width, r[3] * height)
+
+        line = rect(area)
+        name = rect(speaker) if speaker else None
+        line_font = max(12.0, (line[3] - line[1]) / 4.0)
+        name_font = max(10.0, 0.7 * (name[3] - name[1])) if name else line_font * 0.8
+        return cls(width, height, line, name, line_font, name_font, "profile:" + os.path.basename(path))
+
     def scaled(self, width: int, height: int) -> "BoxLayout":
         sx, sy = width / self.width, height / self.height
 

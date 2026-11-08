@@ -29,6 +29,8 @@ FPS = 24.0
 MOVE = {"place_left", "place_center", "place_right", "place", "size", "move_by", "slide_in", "slide_out",
         "left", "right", "up", "down", "scale_by", "rotate_by", "char_scale_to", "char_rotate_to"}
 ALPHA = {"fade_in", "fade_out", "bg_fade_in", "bg_fade_out"}
+SHOT = {"shot_to", "shot_zoom", "shot_track", "shot_reset", "shot_focus_to"}
+SHOT_TARGET = "__shot__"
 DEFAULT_EASE = "OutCubic"
 U_STEPS = 24
 MAX_START_FR = 48
@@ -143,10 +145,16 @@ def compose(snapshot: Snapshot, catalog: Catalog, painter: Painter, override: Op
 
 # ── 한 줄 ────────────────────────────────────────────────────
 
-def channels_of(commands: Sequence[dict], visible_before: set, visible_after: set) -> List[Channel]:
+def channels_of(commands: Sequence[dict], visible_before: set, visible_after: set,
+                shot_changed: bool = True) -> List[Channel]:
     groups: Dict[Tuple[str, str], Channel] = {}
     for j, c in enumerate(commands):
         name = c["name"]
+        if name in SHOT:
+            if not shot_changed:
+                continue
+            groups.setdefault((SHOT_TARGET, "move"), Channel(SHOT_TARGET, "move", [])).indices.append(j)
+            continue
         if not c.get("args"):
             continue
         target = c["args"][0]
@@ -176,12 +184,16 @@ def _set_arg(cmd: dict, index: Optional[int], value: str) -> None:
 
 
 class TimingMeter:
-    def __init__(self, oracle: Oracle, catalog: Catalog, painter: Painter, mask: np.ndarray, table: EaseTable):
+    def __init__(self, oracle: Oracle, catalog: Catalog, painter: Painter, mask: np.ndarray, table: EaseTable,
+                 effects=None, px_scale: float = 1.0):
         self.oracle = oracle
         self.catalog = catalog
         self.painter = painter
         self.mask = mask
         self.table = table
+        self.effects = effects          # EffectPresets — 캐릭터 비주얼이 바뀌는 슬롯을 그릴 때(근사, P3)
+        self.px_scale = px_scale
+        self._recolor: Dict[str, tuple] = {}
 
     def _probe(self, history: Sequence[Sequence[dict]], line: Sequence[dict], live: Sequence[int],
                times: Sequence[float]) -> List[Snapshot]:
@@ -227,8 +239,10 @@ class TimingMeter:
         return canvas
 
     def measure_line(self, history: Sequence[Sequence[dict]], line: Sequence[dict], channels: Sequence[Channel],
-                     frames: Sequence[Tuple[float, np.ndarray]]) -> None:
-        """한 줄의 흐름을 모두 잰다. 움직임은 하나씩, 투명도는 함께(동시에 사라지는 페이드가 서로 섞인다)."""
+                     frames: Sequence[Tuple[float, np.ndarray]], recolor: Optional[Dict[str, tuple]] = None) -> None:
+        """한 줄의 흐름을 모두 잰다. 움직임은 하나씩, 투명도는 함께(동시에 사라지는 페이드가 서로 섞인다).
+        recolor: 슬롯 → (앞 비주얼, 뒤 비주얼, 바뀌는 초) — 캐릭터 비주얼이 줄 머리에서 바뀌는 슬롯(근사로 섞어 그린다)."""
+        self._recolor = recolor or {}
         if not frames:
             for ch in channels:
                 ch.note = "프레임 없음"
@@ -242,6 +256,37 @@ class TimingMeter:
             moving = [j for ch in channels if ch.kind == "move" for j in ch.indices]
             self._measure_alpha(history, line, alphas, frames,
                                 {ch.target for ch in channels if ch.kind == "move"}, moving)
+
+    def _recolored(self, layers):
+        """줄 머리에서 비주얼이 바뀌는 슬롯은 (앞 · 뒤) 두 모양을 미리 그려 둔다 → t초의 layers를 내는 함수."""
+        from .effects import visual_layer
+        if not self._recolor or self.effects is None:
+            return lambda t: layers
+        pairs = {}
+        for key, a0, color, alpha in layers:
+            spec = self._recolor.get(key)
+            if not spec:
+                continue
+            looks = []
+            for v in spec[:2]:
+                if v and v[0] in self.effects.visual:
+                    looks.append(visual_layer(color, alpha, self.effects.visual[v[0]], v[1], self.px_scale))
+                else:
+                    looks.append((color, alpha))
+            pairs[key] = (looks[0], looks[1], max(1e-6, float(spec[2])))
+        if not pairs:
+            return lambda t: layers
+
+        def at(t: float):
+            out = []
+            for key, a0, color, alpha in layers:
+                if key in pairs:
+                    (c0, al0), (c1, al1), dur = pairs[key]
+                    r = float(np.clip(t / dur, 0.0, 1.0))
+                    color, alpha = c0 * (1 - r) + c1 * r, al0 * (1 - r) + al1 * r
+                out.append((key, a0, color, alpha))
+            return out
+        return at
 
     def _measure_move(self, history, line, channel: Channel, frames, others=frozenset()) -> None:
         ts = np.array([t for t, _ in frames])
@@ -269,6 +314,8 @@ class TimingMeter:
             renders.append(img)
             if channel.target in covers and 0.0 <= u <= 1.0:
                 region |= covers[channel.target] > 0.5
+        if channel.target == SHOT_TARGET:
+            region = np.ones(self.mask.shape, bool)   # 카메라는 무대 전체가 함께 움직인다
         region &= self.mask > 0
         # 같은 줄에서 함께 변하는 다른 슬롯(페이드 · 움직임)이 덮는 자리는 뺀다 — 탐침에서는 그 슬롯이 이미 끝 상태다.
         for sn in (snaps[0], snaps[-1]):
@@ -320,7 +367,9 @@ class TimingMeter:
             empty = self._mix(layers, {k: 0.0}, shape)
             regions[k] = (np.abs(full - empty).mean(2) > 12) & (self.mask > 0) & ~busy
         series = {k: [] for k in keys}
-        for _, f in frames:
+        layers_at = self._recolored(layers)
+        for t_frame, f in frames:
+            layers = layers_at(t_frame)
             est = {k: 0.5 for k in keys}
             for _ in range(4 if len(keys) > 1 else 1):
                 for k in keys:

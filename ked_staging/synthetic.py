@@ -90,7 +90,7 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
                    layout, size: Tuple[int, int] = (1920, 1080), fps: float = 30.0, cps: float = 24.0,
                    hold: float = 0.9, hold_jitter: float = 0.4, lead_in: float = 0.6, tail: float = 0.8,
                    noise: float = 2.0, seed: int = 7, font_path: Optional[str] = None,
-                   route: Sequence[str] = (), oracle=None) -> dict:
+                   route: Sequence[str] = (), oracle=None, effect_presets=None) -> dict:
     """오라클이 접은 줄들(route_lines)로 대사창 · 타자기 · 무대 전이가 있는 녹화를 쓰고 정답을 돌려준다.
 
     줄 머리(head)에 앞 줄 본문이 지워지고 이름이 바뀌며 무대가 움직이기 시작한다.
@@ -100,14 +100,28 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
     본문은 cps 글자/초로 찍히고, 다 찍히고 무대도 정착한 뒤 hold(+흔들림)만큼 머문다(다음 줄 머리의 트윈 가속을 피한다).
     """
     from .dialogue import BoxPainter, split_speaker
+    from .effects import EffectState, render_with_effects
+    from .render import render_layers
     rng = np.random.default_rng(seed)
     w, h = int(size[0]), int(size[1])
     box = layout.scaled(w, h)
     painter = BoxPainter(box, font_path)
     scale = w / float(oracle_size[0])
+    effects = EffectState()
+    fx_presets = effect_presets
+    fx_rng = np.random.default_rng(seed + 1)
 
     def draw(snapshot) -> np.ndarray:
         return render(snapshot, catalog, oracle_size[0], oracle_size[1], scale=scale)
+
+    def draw_fx(snapshot, t: float) -> np.ndarray:
+        """효과(근사)가 걸려 있으면 층마다 그려 얹는다."""
+        if fx_presets is None or not effects.active(t):
+            return draw(snapshot).astype(np.float32)
+        layer_of = {sl["key"]: sl.get("layer", "mid") for sl in snapshot.slots}
+        layers = [(k, layer_of.get(k, "mid"), c, a)
+                  for k, c, a in render_layers(snapshot, catalog, oracle_size[0], oracle_size[1], scale)]
+        return render_with_effects(layers, effects, fx_presets, t, (w, h), scale / 0.25, fx_rng)
 
     stages = [draw(l["snapshot"]) for l in lines]          # uint8 — 긴 경로에서도 메모리를 아낀다
     black = np.zeros((h, w, 3), np.uint8)
@@ -123,7 +137,7 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
         if oracle is not None:
             tl = oracle.timeline(commands[:i + 1], [])
             schedule = tl["schedule"]
-            trans = 0.0 if same else float(tl["end"])
+            trans = float(tl["end"])   # 정착 화면이 같아도 줄 안에서 지나가는 움직임(제자리 모션)이 있을 수 있다
         else:
             trans = 0.0 if same else transition_seconds(line.get("commands", []))
         typed = len(body) / cps
@@ -150,10 +164,12 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
             k += 1
             moving = {}
             p = plan[k]
+            effects.flashes = []
+            effects.apply_commands(p["commands"], p["head"])
             if oracle is not None and p["transition"] > 0:
                 ns = [m for m in range(n, n_frames) if m / fps < p["settle"]]
                 tl = oracle.timeline(commands[:k + 1], [m / fps - p["head"] for m in ns])
-                moving = {m: draw(snap) for m, snap in zip(ns, tl["snapshots"])}
+                moving = {m: snap for m, snap in zip(ns, tl["snapshots"])}
         boxed = not (k < 0 or t >= plan[-1]["end"])
         if k < 0:
             frame = black
@@ -163,10 +179,12 @@ def write_scenario(path: str, lines: Sequence[dict], catalog: Catalog, oracle_si
             p = plan[k]
             prev = stages[k - 1] if k > 0 else black
             if n in moving:
-                frame = moving[n]
+                frame = draw_fx(moving[n], t)
             elif oracle is None and p["transition"] > 0 and t < p["settle"]:
                 e = _out_cubic((t - p["head"]) / p["transition"])
                 frame = prev.astype(np.float32) * (1 - e) + stages[k].astype(np.float32) * e
+            elif fx_presets is not None and effects.active(t):
+                frame = draw_fx(lines[k]["snapshot"], t)
             else:
                 frame = stages[k]
         frame = frame.astype(np.float32)

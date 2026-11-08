@@ -162,7 +162,9 @@ def detect_lines(track: InkTrack, min_gap: float = 0.25) -> List[LineSpan]:
         typed_i = grow[-1] if grow else i
         if max(track.ink[i:end_i], default=0) < present:
             continue  # 글자가 끝내 안 생긴 구간 — 줄이 아니다
-        end_t = track.times[end_i] if end_i < n else track.times[-1] + (track.times[-1] - track.times[-2] if n > 1 else 0)
-        spans.append(LineSpan(track.times[i], track.times[typed_i], end_t, kind,
+        step = (track.times[-1] - track.times[0]) / max(1, n - 1) if n > 1 else 0.0
+        end_t = track.times[end_i] if end_i < n else track.times[-1] + step
+        # 줄 머리는 앞 프레임과 이 프레임 사이 어딘가다 — 반 프레임 앞으로 둔다(기댓값). 시간 재기의 시작이 덜 치우친다.
+        spans.append(LineSpan(track.times[i] - 0.5 * step, track.times[typed_i], end_t, kind,
                               int(track.ink[typed_i])))
     return spans

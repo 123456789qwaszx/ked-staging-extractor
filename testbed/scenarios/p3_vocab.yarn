@@ -1,0 +1,53 @@
+title: P3_Vocab
+---
+// P3 시험장 대본 — 카메라(shot_to · shot_reset), 모션(nod 제자리 · bow 자세가 남음), 슬라이드 등 · 퇴장.
+<<shot_reset 0fr>>
+<<bg_spawn bg_main class_day>>
+<<slot s1 stage00 mid>>
+<<cast s1 harin a 1>>
+<<slot s2 stage00 mid>>
+<<cast s2 sigure a 1>>
+
+<<bg_fade_in bg_main 24fr>>
+방과 후, 미술실 앞 복도.
+
+<<place_center s1 bust 0fr>>
+<<size s1 mid bust 0fr>>
+<<fade_in s1 12fr>>
+하린: 간판은 오늘 안에 끝낼 수 있을 것 같아.
+
+<<face s1 2>>
+<<motion s1 nod>>
+하린: 응, 분명히 할 수 있어.
+
+<<place_left s1 bust 16fr>>
+<<place_right s2 bust 0fr>>
+<<size s2 mid bust 0fr>>
+<<slide_in s2 right 4u 16fr>>
+<<fade_in s2 16fr>>
+시구레: 저도 도울게요. 붓 가져왔어요.
+
+<<shot_to 6 0u 0u 20fr InOutSine>>
+하린: 좋아. 그럼 글씨부터 칠하자.
+
+<<motion s2 bow>>
+시구레: 잘 부탁드려요.
+
+<<shot_to 6 -3u 0u 16fr>>
+<<face s1 3>>
+하린: 잠깐, 거기 선이 삐뚤어졌어.
+
+<<shot_reset 18fr>>
+시구레: 앗, 정말이네요. 다시 그릴게요.
+
+<<motion s1 nod>>
+하린: 천천히 해도 돼.
+
+<<slide_out s1 left 4u 14fr>>
+<<fade_out s1 14fr>>
+시구레: 하린 씨는 물감 더 가지러 갔다.
+
+<<bg_fade_out bg_main 24fr>>
+<<fade_out s2 18fr>>
+그렇게 간판이 조금씩 완성되어 갔다.
+===

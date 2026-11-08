@@ -45,8 +45,10 @@ ked-staging-extractor/          ← 이 저장소 (파이썬)
     emit.py        출력 — *.staging.json · .yarn
     pipeline.py    추출 한 번(위 순서대로)
     timing.py      시간과 이징 — 흐름마다 진행도 재기 · (시작, 길이, 이징) 맞추기 · pause 끼우기
-    evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교(상태 · 대사 · 시간)
-  docs/oracle-protocol.md · docs/PLAN-P1.md
+    vocab.py       남은 어휘 — 줄 안에서만 보이는 움직임(제자리 모션 · 슬라이드)
+    effects.py     화면 효과(근사) — 캐릭터 비주얼 · 비네트 · 플래시 · 노이즈 · 층 블러의 모양과 알아보기
+    evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교(상태 · 대사 · 시간 · 어휘)
+  docs/oracle-protocol.md · docs/PLAN-P1.md · docs/P2.md · docs/P3.md
   testbed/manifest.example.json · testbed/scenarios/p1_basic.yarn
   RECORDING.md   실제 런타임 녹화 안내(필요할 때)
 
@@ -85,7 +87,16 @@ ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대
 - [x] 흐름(움직임 · 투명도)마다 진행도를 영상에서 재고 (시작 · 길이 · 이징 35종)을 맞춘다, 늦은 시작은 `pause`
 - [x] 통과 기준 — `p2_timing.yarn`(10줄, 흐름 14)과 `p1_basic.yarn`(흐름 15)에서 길이 2fr 안 100%, 시작 2fr 안 100%, 이징 일치 100%
 
-**P3 남은 어휘 — 다음**
+**P3 남은 어휘 — 끝(2026-11-08)** · 방법 · 결과 · 정해진 것은 [docs/P3.md](docs/P3.md)
+
+- [x] 카메라(`shot_to` · `shot_reset`) — 앞 줄 무대가 지금 카메라로 안 맞으면 샷을 다시 잰다
+- [x] 모션 — 오라클 `timeline`이 모션 재생 중 값을 뜬다(코어 `MotionMath.Compose`). 제자리(nod)는 줄 안 프레임으로, 자세가 남는 것(bow)은 관측으로
+- [x] 슬라이드(`slide_in` · `slide_out`) — 방향 · 거리 · 길이, 페이드 길이도 맞춘다
+- [x] 화면 효과(근사) — 캐릭터 비주얼 · 비네트 · 플래시 · 노이즈 · 층 블러. 효과를 낸 줄에는 `// 확인: 효과는 근사`
+- [x] 통과 기준 — `p3_vocab.yarn`(어휘 8) · `p3_effects.yarn`(효과 10) 재현율 · 정밀도 100%, 상태 100%, 시간 P2 기준 통과
+- 범위 밖으로 정함: 오디오(bgm · se · voice), 글자 효과(tx · box 태그)
+
+**P4 다른 게임 모드 — 다음** · **P5 엑셀 연출 열 ↔ .yarn — 그다음**
 
 ## 설치 (Windows)
 
@@ -102,9 +113,10 @@ dotnet build ..\ked-story-compositor\src\Vn.StageOracle -c Release
 py -m unittest discover -s tests -t .
 py -m ked_staging synth-check ..\ked-presentation-runtime\Assets\Dialogue\ChapterProgression\presentation_demo_Demo_Presentation.yarn
 
-# 4) P1 · P2 점검 — 시험 녹화 → 추출 → 평가(각 1~2분)
+# 4) P1 · P2 · P3 점검 — 시험 녹화 → 추출 → 평가(각 1~4분)
 py -m ked_staging p1-check
 py -m ked_staging p2-check
+py -m ked_staging p3-check
 ```
 
 오라클 프로토콜이 2로 올랐습니다(P2). 컴포지터를 받은 뒤 2)의 빌드를 다시 해 주세요.
@@ -151,6 +163,13 @@ move_by · 오차), 흐름마다 잰 시간(`timing`: 시작 · 길이 프레임
 `// 확인:` 주석으로 붙습니다.
 
 ## 알려진 한계
+
+**P3**
+
+- 화면 효과는 근사입니다(런타임 셰이더를 코어가 접지 않는다). 세기 · 모양이 실제 화면과 다를 수 있어 언제나 `// 확인`이 붙습니다.
+- 림(focus · inner_rim · outer_rim)은 보지 않습니다. 노이즈는 프리셋 색을 가리지 못해 `default`로 냅니다.
+- 효과가 걸린 채 등장하는 인물, 효과가 바뀌는 동안의 시간 재기는 흔들릴 수 있습니다.
+- 어휘 평가는 갈래 이름만 견줍니다(세기 · 거리는 `staging.json`에서 직접 보세요).
 
 **P2**
 
