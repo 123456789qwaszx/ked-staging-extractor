@@ -12,6 +12,11 @@
   p2-check    시간 축 시험 녹화 → extract → 상태 · 시간 · 이징 평가(P2 점검)
   gte-profile 게임텍스트추출기용 게임 프로필(대사창 자리)을 낸다
 
+  scan          다른 게임(P4): 영상 → 카탈로그 초안(draft.json — 배경 판 · 인물 조각 · 정체 · 표정 무리)
+  draft         초안 보기 · 고치기(카탈로그 툴과 같은 연산)
+  catalog-build 초안 → 카탈로그(catalog.json) + 튜닝 겹본(tuning/)
+  p4-check      '모르는 게임' 시험 녹화 → scan → catalog-build → extract → 이름을 다수결로 대응시켜 평가
+
 런타임 저장소는 --runtime(기본: 이 저장소 옆의 ked-presentation-runtime)이다.
 """
 from __future__ import annotations
@@ -22,6 +27,7 @@ import math
 import os
 import sys
 import time
+from typing import Optional
 
 from .catalog import Catalog, import_runtime
 from .imageio import write_image
@@ -202,7 +208,7 @@ def cmd_extract(args) -> int:
         layout = BoxLayout.from_gte_profile(args.box_profile, int(oracle.width), int(oracle.height)) \
             if args.box_profile else None
         extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset,
-                timing=not args.no_timing, layout=layout)
+                timing=not args.no_timing, layout=layout, motions_path=motions)
     print(f"{time.time() - t0:.0f}초")
     return 0
 
@@ -362,6 +368,163 @@ def cmd_p3_check(args) -> int:
     return 0 if good else 1
 
 
+def cmd_scan(args) -> int:
+    from .dialogue import BoxLayout
+    from .scan import scan
+    import cv2
+    cap = cv2.VideoCapture(args.video)
+    vw, vh = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    if not vw:
+        raise SystemExit(f"영상을 열지 못했습니다: {args.video}")
+    layout = BoxLayout.from_gte_profile(args.box_profile, vw, vh)
+    t0 = time.time()
+    scan(args.video, layout, args.out, args.box_profile)
+    print(f"{time.time() - t0:.0f}초 — 카탈로그 툴(컴포지터 src/Vn.CatalogTool) 또는 `draft`로 고친 뒤 catalog-build")
+    return 0
+
+
+def cmd_draft(args) -> int:
+    from .catalogdraft import DraftEditor, DraftError
+    ed = DraftEditor.load(args.folder)
+    a = args.args
+    try:
+        if args.op is None:
+            pass
+        elif args.op == "rename":
+            ed.rename_character(a[0], a[1])
+        elif args.op == "merge":
+            ed.merge_characters(a[0], a[1], args.variant)
+        elif args.op == "move":
+            if not args.to:
+                raise DraftError("--to 인물[/변형[/표정]]을 주세요")
+            parts = args.to.split("/")
+            e = ed.move(a, parts[0], parts[1] if len(parts) > 1 else "a", parts[2] if len(parts) > 2 else None)
+            print(f"표정 {e}")
+        elif args.op in ("exclude", "include"):
+            ed.exclude(a, args.op == "exclude")
+        elif args.op == "rep":
+            ed.set_representative(a[0])
+        elif args.op == "merge-emotion":
+            ed.merge_emotions(a[0], a[1], a[2], a[3])
+        elif args.op == "bg-rename":
+            ed.rename_background(a[0], a[1])
+        elif args.op in ("bg-exclude", "bg-include"):
+            ed.exclude_background(a[0], args.op == "bg-exclude")
+        else:
+            raise DraftError(f"모르는 고치기: {args.op}")
+    except (DraftError, IndexError) as e:
+        print(f"고치지 못했습니다: {e}", file=sys.stderr)
+        return 2
+    if args.op is not None:
+        ed.save()
+    for c, v, e, members in ed.groups():
+        rep = ed.representative(c, v, e)
+        ids = " ".join(("★" if rep and o["id"] == rep["id"] else "") + o["id"] for o in members)
+        print(f"{c}/{v}/{e}  ({len(members)})  {ids}")
+    out = [o["id"] for o in ed.observations if o.get("excluded")]
+    if out:
+        print(f"뺀 조각: {' '.join(out)}")
+    for b in ed.backgrounds:
+        print(f"배경 {b['key']}{' (뺌)' if b.get('excluded') else ''}: 줄 {len(b.get('lines', []))}개")
+    return 0
+
+
+def cmd_catalog_build(args) -> int:
+    from .catalogdraft import build_catalog
+    _, tuning, _ = _runtime_paths(args.runtime)
+    path, overlay = build_catalog(args.folder, args.out, tuning, [args.oracle] if args.oracle else None)
+    print(f"추출: extract <영상> --catalog {path} --tuning {overlay} --box-profile <프로필>")
+    return 0
+
+
+HOP = {"name": "hop", "rig": "character", "duration": 0.5, "end": "restore", "channels": [
+    {"node": "CharacterPortrait_Track_Move_Y", "kind": "position", "y": [
+        {"t": 0, "v": 0, "inTangent": 0, "outTangent": 0}, {"t": 0.25, "v": 30, "inTangent": 0, "outTangent": 0},
+        {"t": 0.5, "v": 0, "inTangent": 0, "outTangent": 0}]}]}
+HOP_PEAK = 30.0
+
+
+def cmd_p4_check(args) -> int:
+    """P4 점검 — 시험용 초상으로 '모르는 게임' 녹화를 만들고(런타임에 없는 모션 hop 포함), 이름을 숨긴 채
+    scan → catalog-build → extract로 배워 뽑은 뒤, 보이는 모양끼리 이름을 다수결로 대응시켜 견준다."""
+    from .catalogdraft import build_catalog
+    from .evaluate import evaluate_unknown
+    from .dialogue import BoxLayout, gte_profile
+    from .gte import rows_from_truth, write_like_gte
+    from .pipeline import extract
+    from .scan import scan
+    from .synthetic import write_scenario
+    from .testkit import build_test_catalog
+    runtime, tuning, motions = _runtime_paths(args.runtime)
+    os.makedirs(args.out, exist_ok=True)
+    cat = build_test_catalog(import_runtime(runtime), os.path.join(args.out, "testkit"))
+    yarn = args.yarn or [os.path.join(_REPO, "testbed", "scenarios", "p4_unknown.yarn")]
+    with open(motions, encoding="utf-8-sig") as f:
+        table = json.load(f)
+    table["motions"] = [m for m in table.get("motions", []) if m.get("name") != "hop"] + [HOP]
+    hop_motions = os.path.join(args.out, "motions-hop.json")
+    with open(hop_motions, "w", encoding="utf-8") as f:
+        json.dump(table, f, ensure_ascii=False, indent=1)
+    layout = BoxLayout.from_tuning(tuning)
+    video = os.path.join(args.out, "scenario.mp4")
+    cmd = [args.oracle] if args.oracle else None
+    quiet = (lambda m: None) if not args.verbose else print
+    t0 = time.time()
+    with Oracle(tuning, hop_motions, command=cmd) as oracle:
+        lines = route_lines(oracle.fold_yarn(yarn))
+        truth = write_scenario(video, lines, cat, (oracle.width, oracle.height), layout, size=_size(args.size),
+                               route=yarn, oracle=oracle)
+        truth_snaps = [l["snapshot"] for l in lines]       # 쪼개짐 세기용
+    xlsx = write_like_gte(os.path.join(args.out, "gte-simulated.xlsx"), rows_from_truth(truth))
+    profile = os.path.join(args.out, "game.gte-profile.json")
+    with open(profile, "w", encoding="utf-8") as f:
+        json.dump(gte_profile(layout, "모르는 게임(시험)"), f, ensure_ascii=False, indent=2)
+    print(f"시험 녹화: 줄 {len(lines)} · {truth['duration']:.1f}초")
+    vw, vh = _size(args.size)
+    scan(video, BoxLayout.from_gte_profile(profile, vw, vh), os.path.join(args.out, "draft"), profile, log=print)
+    cat_path, overlay = build_catalog(os.path.join(args.out, "draft"), os.path.join(args.out, "catalog"), tuning, cmd,
+                                      log=print)
+    got_cat = Catalog.load(cat_path)
+    with Oracle(overlay, motions, command=cmd) as oracle:
+        box = BoxLayout.from_gte_profile(profile, int(oracle.width), int(oracle.height))
+        staging = extract(video, oracle, got_cat, overlay, os.path.join(args.out, "extract"), xlsx, node="P4_Check",
+                          layout=box, motions_path=motions, log=quiet)
+        # 정답 대본의 hop은 이 모션 표에 없다 — 제자리 모션이라 정착 화면은 같다.
+        report = evaluate_unknown(truth, staging, oracle, cat, got_cat, layout.stage_bottom())
+    # 모션 초안 — hop이 있는 정답 줄의 짝 줄에서 나온 초안의 y 봉우리
+    hop_lines = [i for i, l in enumerate(truth["lines"]) if any(c["name"] == "motion" and c["args"][1:2] == ["hop"]
+                                                               for c in l["commands"])]
+    pair = {r["truth"]: r["got"] for r in report["lines"]}
+    drafts = {d["line"]: d for d in staging.get("motionDrafts", [])}
+    peaks = [drafts[pair[i]]["peak"][1] for i in hop_lines if i in pair and pair[i] in drafts]
+    report["motionPeak"] = peaks[0] if peaks else None
+    report["motionDrafts"] = len(drafts)
+    motion_ok = not hop_lines or (bool(peaks) and abs(peaks[0] - HOP_PEAK) <= 3.0)
+    report["pass"] = bool(report["pass"] and motion_ok)
+    # 쪼개짐 — 순도는 한 사람을 둘로 나눠도 깎이지 않는다. 사람이 툴에서 합칠 일이 얼마나 남았나를 따로 센다.
+    true_c = {(s.get("character")) for sn in truth_snaps for s in sn.visible_slots(0.5)
+              if s.get("character") and not s.get("background")}
+    true_e = {(s.get("character"), s.get("variant"), s.get("emotion")) for sn in truth_snaps
+              for s in sn.visible_slots(0.5) if s.get("character") and not s.get("background")}
+    report["learned"] = {"characters": len(report["characters"]), "expressions": len(report["expressions"])}
+    report["truth"] = {"characters": len(true_c), "expressions": len(true_e)}
+    with open(os.path.join(args.out, "report.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=1)
+    print(f"이름 대응: 인물 {report['characters']} · 배경 {report['backgrounds']}")
+    print(f"배운 인물 {report['learned']['characters']}명(정답 {report['truth']['characters']}) · 표정 무리 "
+          f"{report['learned']['expressions']}개(정답 {report['truth']['expressions']})")
+    print(f"인물 순도 {report['identityPurity'] * 100:.1f}% · 표정 순도 {report['expressionPurity'] * 100:.1f}% · "
+          f"줄 일치 {report['lineMatch'] * 100:.1f}% · 모양 겹침 평균 {report['meanIoU']:.3f}")
+    for row in report["lines"]:
+        if row["state"]:
+            print(f"  정답 줄 {row['truth']}: {'; '.join(row['state'])}")
+    if hop_lines:
+        print(f"모션 초안 {len(drafts)}개 · hop 봉우리 {report['motionPeak']}(정답 {HOP_PEAK:g})")
+    print(("P4 통과" if report["pass"] else "P4 미통과") + f" · {time.time() - t0:.0f}초 · 결과 {args.out}")
+    return 0 if report["pass"] else 1
+
+
 def cmd_gte_profile(args) -> int:
     from .dialogue import BoxLayout, gte_profile
     _, tuning, _ = _runtime_paths(args.runtime)
@@ -461,6 +624,35 @@ def main(argv=None) -> int:
     p.add_argument("--out", default="p3-check-out")
     p.add_argument("--size", default="1280x720")
     p.set_defaults(func=cmd_p3_check)
+
+    p = sub.add_parser("scan", help="P4: 다른 게임 영상 → 카탈로그 초안")
+    p.add_argument("video")
+    p.add_argument("--box-profile", required=True, help="그 게임의 게임텍스트추출기 프로필(대사창 자리)")
+    p.add_argument("--out", default="draft")
+    p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("draft", help="P4: 초안 보기 · 고치기")
+    p.add_argument("folder", help="초안 폴더(draft.json)")
+    p.add_argument("op", nargs="?", choices=["rename", "merge", "move", "exclude", "include", "rep", "merge-emotion",
+                                             "bg-rename", "bg-exclude", "bg-include"])
+    p.add_argument("args", nargs="*")
+    p.add_argument("--to", help="move: 인물[/변형[/표정]] (표정을 비우면 새 번호)")
+    p.add_argument("--variant", help="merge: 옷이 다른 같은 인물로 — 이 변형으로 합친다")
+    p.set_defaults(func=cmd_draft)
+
+    p = sub.add_parser("catalog-build", help="P4: 초안 → 카탈로그 + 튜닝 겹본")
+    p.add_argument("folder", help="초안 폴더(draft.json)")
+    p.add_argument("--out", default="catalog")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.set_defaults(func=cmd_catalog_build)
+
+    p = sub.add_parser("p4-check", help="P4 점검('모르는 게임' 녹화 → scan → catalog-build → extract → 평가)")
+    p.add_argument("yarn", nargs="*")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.add_argument("--out", default="p4-check-out")
+    p.add_argument("--size", default="1280x720")
+    p.add_argument("--verbose", action="store_true")
+    p.set_defaults(func=cmd_p4_check)
 
     p = sub.add_parser("gte-profile", help="게임텍스트추출기 프로필 내기")
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)

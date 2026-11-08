@@ -14,3 +14,4 @@ __pycache__/
 catalog.json
 # 다른 게임 영상 · 카탈로그는 저장소에 넣지 않는다(규칙 9)
 /private/
+/p4-check-out/

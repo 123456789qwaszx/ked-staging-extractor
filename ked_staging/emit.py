@@ -33,9 +33,11 @@ def node_name(text: str) -> str:
     return name if name[0].isalpha() else "N_" + name
 
 
-def write_yarn(path: str, node: str, script: Script, lines: Sequence[dict], source: str = "") -> str:
+def write_yarn(path: str, node: str, script: Script, lines: Sequence[dict], source: str = "",
+               timed: bool = True) -> str:
     out: List[str] = [f"title: {node_name(node)}", "---"]
-    out.append(f"// ked-staging-extractor P1 초안 — {os.path.basename(source)}. 시간 인자는 생략값이다(P2에서 잰다).")
+    when = "시간 · 이징은 영상에서 잰 값이다(못 잰 것은 생략값)" if timed else "시간 인자는 생략값이다(--no-timing)"
+    out.append(f"// ked-staging-extractor 초안 — {os.path.basename(source)}. {when}. 시험장 · 빠른 재생용이다.")
     out += [command_text(c) for c in script.header]
     for i, line in enumerate(lines):
         out.append("")

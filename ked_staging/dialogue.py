@@ -36,6 +36,7 @@ class BoxLayout:
     line_font: float
     name_font: float
     preset: str = DEFAULT_PRESET
+    extra: Optional[Rect] = None     # 대사창에 붙은 다른 판(장소/시간 카드 등) — 무대가 아니지만 잉크는 보지 않는다
 
     @classmethod
     def from_tuning(cls, tuning_dir: str, width: int = 1920, height: int = 1080,
@@ -64,23 +65,37 @@ class BoxLayout:
         글자 크기는 모르므로 본문 자리 높이의 1/4(세 줄 + 여백)로 어림한다."""
         with open(path, encoding="utf-8-sig") as f:
             data = json.load(f)
-        area = speaker = None
-        for r in data.get("regions", []):
-            if r.get("type") == "area" and area is None:
-                area = r["rect"]
-            elif r.get("type") == "speaker" and speaker is None:
-                speaker = r["rect"]
-        if area is None:
+
+        def norm(r) -> Tuple[float, float, float, float]:
+            # 게임텍스트추출기처럼 모서리 순서를 바로잡는다(끌어 그린 방향대로 저장될 수 있다).
+            x0, y0, x1, y1 = (float(v) for v in r)
+            return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+
+        regions = [(r.get("type"), norm(r["rect"])) for r in data.get("regions", []) if len(r.get("rect", [])) == 4]
+        areas = [b for t, b in regions if t == "area"]
+        if not areas:
             raise KeyError(f"프로필에 'area' 영역이 없습니다: {path}")
+        # 본문 영역이 여럿이면(컷신 자막 등) 가장 아래 것이 대사창이다.
+        area = max(areas, key=lambda b: b[3])
+        # 이름표는 여럿일 수 있다(자리가 바뀌는 이름표) — 대사창과 높이가 겹치는 것을 모두 덮는다.
+        # 장소/시간 카드('label')도 대사창에 붙어 있으면 무대가 아니다.
+        def near(kind: str) -> List[Tuple[float, float, float, float]]:
+            return [b for t, b in regions if t == kind and b[3] > area[1] - 0.1 and b[1] < area[3]]
 
         def rect(r) -> Rect:
             return (r[0] * width, r[1] * height, r[2] * width, r[3] * height)
 
+        def union(bs) -> Optional[Rect]:
+            if not bs:
+                return None
+            return rect((min(b[0] for b in bs), min(b[1] for b in bs), max(b[2] for b in bs), max(b[3] for b in bs)))
+
+        speakers, labels = near("speaker"), near("label")
         line = rect(area)
-        name = rect(speaker) if speaker else None
+        name = union(speakers)
         line_font = max(12.0, (line[3] - line[1]) / 4.0)
-        name_font = max(10.0, 0.7 * (name[3] - name[1])) if name else line_font * 0.8
-        return cls(width, height, line, name, line_font, name_font, "profile:" + os.path.basename(path))
+        name_font = max(10.0, 0.7 * (speakers[0][3] - speakers[0][1]) * height) if speakers else line_font * 0.8
+        return cls(width, height, line, name, line_font, name_font, "profile:" + os.path.basename(path), union(labels))
 
     def scaled(self, width: int, height: int) -> "BoxLayout":
         sx, sy = width / self.width, height / self.height
@@ -89,14 +104,15 @@ class BoxLayout:
             return None if r is None else (r[0] * sx, r[1] * sy, r[2] * sx, r[3] * sy)
 
         return BoxLayout(width, height, sc(self.line), sc(self.name), self.line_font * sy, self.name_font * sy,
-                         self.preset)
+                         self.preset, sc(self.extra))
 
     def panel(self) -> Rect:
         """대사창 판(이름표 + 본문)을 덮는 사각형 — 그리기와 대조 가림에 같이 쓴다."""
         x0, y0, x1, y1 = self.line
-        if self.name:
-            x0, y0 = min(x0, self.name[0]), min(y0, self.name[1])
-            x1 = max(x1, self.name[2])
+        for r in (self.name, self.extra):
+            if r:
+                x0, y0 = min(x0, r[0]), min(y0, r[1])
+                x1 = max(x1, r[2])
         mx, my = 0.02 * self.width, 0.025 * self.height
         return (max(0.0, x0 - mx), max(0.0, y0 - my), min(self.width, x1 + mx), min(self.height, y1 + my))
 

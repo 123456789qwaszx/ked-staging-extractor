@@ -43,6 +43,7 @@ UNEXPLAINED_SKIP = 0.01       # 설명 못 한 화면이 이 비율보다 적으
 CANONICAL_SNAP_PX = 8.0       # 이동 없는 어휘 자리로 바꿔 부를 허용(캔버스 px)
 TRACK_REACH = 128            # 앞 줄 인물을 따라갈 때 평행 이동 범위(분석 px)
 SHIFT_REACH = 48             # 평행 이동 탐색 범위(분석 px, 1/4 배율이면 화면 192px)
+EMOTION_DIFF = 16.0          # 표정 그림끼리 이만큼 다른 화소에서만 표정을 견준다
 VISUAL_TRY = 0.5             # 앞 줄 인물 영역 오차가 KEEP_ERROR의 이 배를 넘으면 캐릭터 비주얼을 바꿔 본다
 VISUAL_GAIN = 0.7            # 비주얼을 바꾸려면 오차가 이 비율 아래로 줄어야 한다
 VISUAL_MIN_DROP = 2.0        # …그리고 이만큼은 줄어야 한다(평균 오차)
@@ -779,7 +780,7 @@ class Observer:
         if sl is None:
             return f, False
         below = self._compose(base[sl], [_crop_fit(g, sl) for g in fits[:i]])
-        scores = []
+        rendered = []
         for entry in options:
             color, alpha = self.painter.layer(entry, f.quad, f.mirror)
             if f.visual and self.fx is not None:
@@ -789,11 +790,21 @@ class Observer:
             for g in fits[i + 1:]:
                 ga = g.alpha[sl][:, :, None]
                 out = g.color[sl] * ga + out * (1 - ga)
-            scores.append((float((robust_error(frame[sl], out) * self.mask[sl]).sum()), entry, color, alpha))
+            rendered.append((entry, color, alpha, out))
+        # 표정 그림끼리 실제로 다른 자리(얼굴)에서만 견준다 — 몸 · 테두리의 작은 어긋남(다시 표본 내기 · 압축)이
+        # 얼굴 차이를 묻지 않게. 다른 자리가 거의 없으면(그림이 같다) 전체로.
+        differ = np.zeros(rendered[0][3].shape[:2], bool)
+        for _, _, _, out in rendered[1:]:
+            differ |= np.abs(out - rendered[0][3]).mean(2) > EMOTION_DIFF
+        differ = cv2.dilate(differ.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool) & (self.mask[sl] > 0)
+        weight = differ.astype(np.float32) if differ.sum() >= 12 else self.mask[sl]
+        scores = [(float((robust_error(frame[sl], out) * weight).sum()), entry, color, alpha)
+                  for entry, color, alpha, out in rendered]
         scores.sort(key=lambda s: s[0])
         best = scores[0]
         spread = scores[-1][0] - best[0]
-        sure = len(scores) > 1 and (scores[1][0] - best[0]) > max(30.0, 0.02 * best[0])
+        margin = max(8.0, 0.05 * best[0]) if weight is not self.mask[sl] else max(30.0, 0.02 * best[0])
+        sure = len(scores) > 1 and (scores[1][0] - best[0]) > margin
         if spread < 1.0 and previous:
             # 표정 그림이 모두 같다 — 화면으로는 모른다. 앞 줄 표정을 잇는다.
             keep = next((s for s in scores if s[1].emotion == previous), best)

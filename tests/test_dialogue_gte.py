@@ -60,3 +60,31 @@ class GteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProfileLayoutTests(unittest.TestCase):
+    """게임텍스트추출기 프로필(다른 게임) — 모서리 순서가 뒤집힌 영역, 이름표 여럿, 장소/시간 카드, 무시 영역."""
+
+    def test_real_world_profile_shape(self):
+        import json
+        import tempfile
+        from ked_staging.dialogue import BoxLayout
+        profile = {"name": "t", "regions": [
+            {"type": "area", "rect": [0.90104, 0.99074, 0.03125, 0.68056]},          # 끌어 그린 방향 그대로
+            {"type": "label", "rect": [0.0, 0.68519, 0.10417, 0.87963]},
+            {"type": "speaker", "rect": [0.18229, 0.71296, 0.41146, 0.78889]},
+            {"type": "speaker", "rect": [0.10417, 0.73148, 0.17969, 0.78889]},
+            {"type": "ignore", "rect": [0.80469, 0.90278, 0.84635, 0.96296]},
+            {"type": "area", "rect": [0.2, 0.05, 0.8, 0.12]}]}                       # 위쪽 컷신 자막
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            json.dump(profile, f)
+        lay = BoxLayout.from_gte_profile(f.name, 1920, 1080)
+        self.assertAlmostEqual(lay.line[0], 0.03125 * 1920, places=3)
+        self.assertAlmostEqual(lay.line[1], 0.68056 * 1080, places=3)
+        self.assertAlmostEqual(lay.name[0], 0.10417 * 1920, places=3)      # 두 이름표를 덮는다
+        self.assertAlmostEqual(lay.name[2], 0.41146 * 1920, places=3)
+        self.assertAlmostEqual(lay.extra[0], 0.0, places=3)                # 장소/시간 카드는 판에만
+        self.assertLess(lay.stage_bottom(), 0.68056 * 1080)
+        self.assertGreater(lay.stage_bottom(), 0.6 * 1080)
+        half = lay.scaled(960, 540)
+        self.assertAlmostEqual(half.extra[3], lay.extra[3] / 2, places=3)

@@ -47,12 +47,16 @@ ked-staging-extractor/          ← 이 저장소 (파이썬)
     timing.py      시간과 이징 — 흐름마다 진행도 재기 · (시작, 길이, 이징) 맞추기 · pause 끼우기
     vocab.py       남은 어휘 — 줄 안에서만 보이는 움직임(제자리 모션 · 슬라이드)
     effects.py     화면 효과(근사) — 캐릭터 비주얼 · 비네트 · 플래시 · 노이즈 · 층 블러의 모양과 알아보기
+    scan.py        다른 게임(P4) — 영상 → 카탈로그 초안(배경 판 · 인물 조각 · 정체 · 표정 무리)
+    catalogdraft.py 초안 고치기(카탈로그 툴과 같은 연산) · 초안 → 카탈로그 + 튜닝 겹본
+    motiondraft.py 어휘로 설명 못 한 움직임 → ked-motion-tool 모션 초안(*.motion-authoring.json)
     evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교(상태 · 대사 · 시간 · 어휘)
-  docs/oracle-protocol.md · docs/PLAN-P1.md · docs/P2.md · docs/P3.md
+  docs/oracle-protocol.md · docs/PLAN-P1.md · docs/P2.md · docs/P3.md · docs/P4.md
   testbed/manifest.example.json · testbed/scenarios/p1_basic.yarn
   RECORDING.md   실제 런타임 녹화 안내(필요할 때)
 
 ked-story-compositor/src/Vn.StageOracle/   ← 오라클 (.NET, 컴포지터의 Core 사본 · 프리뷰 투영을 그대로 쓴다)
+ked-story-compositor/src/Vn.CatalogTool/   ← 카탈로그 툴 (Avalonia, P4 초안 고치기 창)
 ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대본 (읽기만)
 ```
 
@@ -96,7 +100,15 @@ ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대
 - [x] 통과 기준 — `p3_vocab.yarn`(어휘 8) · `p3_effects.yarn`(효과 10) 재현율 · 정밀도 100%, 상태 100%, 시간 P2 기준 통과
 - 범위 밖으로 정함: 오디오(bgm · se · voice), 글자 효과(tx · box 태그)
 
-**P4 다른 게임 모드 — 다음** · **P5 엑셀 연출 열 ↔ .yarn — 그다음**
+**P4 다른 게임 모드 — 끝(2026-11-08)** · 방법 · 결과 · 한계는 [docs/P4.md](docs/P4.md)
+
+- [x] `scan` — 영상(+ 그 게임의 게임텍스트추출기 프로필) → 카탈로그 초안: 배경 판, 인물 조각(붙은 덩어리 나누기), 정체 · 표정 무리
+- [x] 초안 고치기 — 컴포지터의 카탈로그 툴(Avalonia, `src/Vn.CatalogTool`) · 명령줄 `draft`(같은 연산, 같은 초안 형식)
+- [x] `catalog-build` — 초안 → 카탈로그(영상 크기 · 자리가 런타임 어휘로 맞게 여백을 두른 초상, 몸 채우기) + 튜닝 겹본(오라클 그대로)
+- [x] `extract --catalog --tuning --box-profile` — P1~P3 그대로. 어휘로 설명 못 한 움직임은 모션 초안(`*.motion-authoring.json`)으로
+- [x] 통과 기준 — '모르는 게임' 녹화(`p4_unknown.yarn`, 이름을 숨긴 시험용 초상)에서 인물 순도 100% · 표정 순도 95% · 줄 일치 90%(짝마다 모양 겹침 0.85), hop 모션 초안 봉우리 ±3px
+
+**P5 엑셀 연출 열 ↔ .yarn — 다음**
 
 ## 설치 (Windows)
 
@@ -117,6 +129,7 @@ py -m ked_staging synth-check ..\ked-presentation-runtime\Assets\Dialogue\Chapte
 py -m ked_staging p1-check
 py -m ked_staging p2-check
 py -m ked_staging p3-check
+py -m ked_staging p4-check
 ```
 
 오라클 프로토콜이 2로 올랐습니다(P2). 컴포지터를 받은 뒤 2)의 빌드를 다시 해 주세요.
@@ -162,7 +175,29 @@ move_by · 오차), 흐름마다 잰 시간(`timing`: 시작 · 길이 프레임
 시간을 재지 않으려면 `extract --no-timing`. `.yarn`은 같은 내용을 대본 모양으로 편 초안이고, 확인할 까닭은
 `// 확인:` 주석으로 붙습니다.
 
+### 다른 게임 (P4)
+
+```powershell
+# 기밀 — 영상 · 초안 · 카탈로그는 private\ 아래(무시 목록)에
+py -m ked_staging scan private\게임\영상.mp4 --box-profile private\게임\게임.gte-profile.json --out private\게임\draft
+dotnet run --project ..\ked-story-compositor\src\Vn.CatalogTool -- private\게임\draft     # 초안 고치기(창)
+py -m ked_staging draft private\게임\draft                                                # 초안 보기(명령줄로도 고친다)
+py -m ked_staging catalog-build private\게임\draft --out private\게임\catalog
+py -m ked_staging extract private\게임\영상.mp4 --catalog private\게임\catalog\catalog.json `
+  --tuning private\게임\catalog\tuning --box-profile private\게임\게임.gte-profile.json --text private\게임\영상_텍스트.xlsx `
+  --out private\게임\extract
+```
+
+어휘로 설명 못 한 움직임이 있으면 `extract`가 `<영상>.motion-authoring.json`(ked-motion-tool 저작 원본)을 함께 냅니다.
+
 ## 알려진 한계
+
+**P4**
+
+- 다른 게임의 인물은 한 크기로 배웁니다. 장면 내내 한자리에 선 인물은 배경 판에 남을 수 있습니다(툴에서 판을 빼고 원본을 쓰세요).
+- 다른 인물에 가린 채로만 나온 표정은 보이는 자리에 차이가 없으면 앞 표정과 한 무리가 됩니다(툴에서 나누세요).
+- 모션 초안은 평행 이동만 잽니다(회전 · 배율 없음).
+- 카탈로그 툴은 Windows에서 처음 띄워 보는 것입니다(클라우드에서는 빌드와 헤드리스 점검만 했습니다).
 
 **P3**
 

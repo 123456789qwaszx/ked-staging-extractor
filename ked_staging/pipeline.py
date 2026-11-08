@@ -108,10 +108,13 @@ def stream_windows(video: str, windows: Sequence[Tuple[float, float]], size: Tup
 
 def measure_motion(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str, observer: Observer,
                    spans: Sequence[LineSpan], stages: Sequence[ObservedStage], script, log=print,
-                   timing: bool = True, vocab: bool = True, settled: Optional[Sequence[np.ndarray]] = None
+                   timing: bool = True, vocab: bool = True, settled: Optional[Sequence[np.ndarray]] = None,
+                   drafts: Optional[list] = None, node: str = "Extracted"
                    ) -> Tuple[List[list], List[list], List[Optional[tuple]]]:
     """P2 · P3 — 줄마다 (1) 흐름(움직임 · 투명도)의 시작 · 길이 · 이징을 재고 (2) 정착 화면에 남지 않는 움직임
-    (제자리 모션 · 슬라이드)을 찾아 script.lines를 고친다. 영상은 한 번만 훑는다. → (줄마다 흐름, 줄마다 찾은 것)"""
+    (제자리 모션 · 슬라이드)을 찾아 script.lines를 고친다. 영상은 한 번만 훑는다. → (줄마다 흐름, 줄마다 찾은 것)
+
+    drafts를 주면 어휘로 설명 못 한 제자리 움직임을 재서 모션 초안(motiondraft)을 거기에 더한다(P4)."""
     from .ease import EaseTable
     from .inverse import BG_KEY
     from .timing import TimingMeter, apply_timing, channels_of
@@ -212,6 +215,19 @@ def measure_motion(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str
             screen_fx = flashes[k] is not None or (prev_st is not None and prev_st.vignette != stages[k].vignette)
             if screen_fx:
                 hits = [h for h in hits if h.kind != "unexplained"]   # 화면 전체 효과가 남긴 어긋남이다
+            if drafts is not None:
+                from .motiondraft import measure as measure_draft, to_motion
+                for h in hits:
+                    if h.kind != "unexplained" or h.slot not in static:
+                        continue
+                    sample = measure_draft(oracle, catalog, observer.painter, observer.mask, work[:k], work[k],
+                                           frames, h.slot)
+                    name = f"draft_l{k:03d}_{h.slot}"
+                    motion = to_motion(name, sample) if sample else None
+                    if motion is not None:
+                        drafts.append({"line": k, "slot": h.slot, "name": name, "motion": motion})
+                        h.note = f"{h.note} → 모션 초안 {name}(.motion-authoring.json)"
+                        log(f"  {k:3d} 모션 초안: {name}")
             if hits:
                 work[k] = apply_findings(work[k], hits)
                 found[k] = hits
@@ -364,9 +380,10 @@ def extract(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str, out_d
     timings: List[list] = [[] for _ in spans]
     found: List[list] = [[] for _ in spans]
     flashes: List[Optional[tuple]] = [None for _ in spans]
+    drafts: list = []
     if (timing or vocab) and spans:
         timings, found, flashes = measure_motion(video, oracle, catalog, tuning_dir, observer, spans, stages, script,
-                                                 log, timing, vocab, frames)
+                                                 log, timing, vocab, frames, drafts=drafts, node=node)
     fx_notes: List[List[str]] = [[] for _ in spans]
     if vocab and spans:
         fx_notes = detect_effects(oracle, catalog, tuning_dir, observer, frames, script, stages, flashes, log,
@@ -391,8 +408,16 @@ def extract(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str, out_d
                 "oracleSize": [oracle.width, oracle.height]}
     doc = staging_document(video, node, script, lines, settings, text_xlsx)
     json_path = os.path.abspath(os.path.join(out_dir, f"{stem}.staging.json"))
-    yarn_path = write_yarn(os.path.abspath(os.path.join(out_dir, f"{stem}.yarn")), node, script, lines, video)
+    yarn_path = write_yarn(os.path.abspath(os.path.join(out_dir, f"{stem}.yarn")), node, script, lines, video, timing)
     doc["files"] = {"staging": json_path, "yarn": yarn_path}
+    if drafts:
+        from .motiondraft import peak, write_authoring
+        motions_out = write_authoring(os.path.abspath(os.path.join(out_dir, f"{stem}.motion-authoring.json")),
+                                      [d["motion"] for d in drafts])
+        doc["files"]["motions"] = motions_out
+        doc["motionDrafts"] = [{"line": d["line"], "slot": d["slot"], "name": d["name"],
+                                "peak": [round(v, 2) for v in peak(d["motion"])]} for d in drafts]
+        log(f"→ {motions_out} (모션 초안 {len(drafts)})")
     write_json(json_path, doc)
     log(f"→ {json_path}\n→ {yarn_path}")
     return doc

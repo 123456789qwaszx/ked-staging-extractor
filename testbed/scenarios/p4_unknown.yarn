@@ -1,0 +1,92 @@
+title: P4_Unknown
+---
+// P4 시험장 대본 — '모르는 게임' 녹화용. 시험은 이 대본을 시험용 초상으로 그린 뒤 이름을 숨기고(카탈로그 없이)
+// 영상에서 인물 · 표정 · 배경을 배워 다시 뽑는다. 한 인물은 한 크기로 서고(학습 한계), 장면은 빈 무대로 열고 닫는다
+// (배경 판의 씨앗). 둘째 장면에서는 앞에 선 카스미가 오른쪽 하린을 가린다(붙은 덩어리 나누기 · 가린 표정).
+// hop은 런타임 motions.json에 없는 모션이다 — p4-check가 더한 모션 표로 녹화하고, 추출은 런타임 표로 하므로
+// 어휘로 설명 못 한 제자리 움직임 → 모션 초안이 나와야 한다(봉우리 30px).
+<<shot_reset 0fr>>
+<<bg_spawn bg_main class_day>>
+<<slot s1 stage00 mid>>
+<<cast s1 harin a 1>>
+<<slot s2 stage00 mid>>
+<<cast s2 sigure a 1>>
+<<slot s3 stage00 mid>>
+<<cast s3 kasmi a 1>>
+
+<<bg_fade_in bg_main 24fr>>
+아침 교실은 아직 조용하다.
+
+<<place_center s1 bust 0fr>>
+<<size s1 mid bust 0fr>>
+<<fade_in s1 18fr>>
+하린: 좋은 아침! 오늘은 일찍 왔네.
+
+<<face s1 2>>
+하린: 어제 말한 포스터, 밤새 다 그려 왔어.
+
+<<place_left s1 bust 12fr>>
+<<place_right s2 bust 0fr>>
+<<size s2 mid bust 0fr>>
+<<fade_in s2 14fr>>
+시구레: 정말요? 저는 아직 반밖에 못 했어요.
+
+<<face s2 3>>
+시구레: 색칠이 생각보다 오래 걸려서요.
+
+<<face s1 3>>
+하린: 괜찮아, 같이 하면 금방이야.
+
+<<face s2 2>>
+시구레: 그럼 점심시간에 미술실로 갈게요.
+
+<<face s1 4>>
+<<motion s1 hop>>
+하린: 좋아. 붓은 내가 챙길게.
+
+<<fade_out s2 14fr>>
+<<face s1 1>>
+하린: 나도 이제 가 봐야겠다.
+
+<<fade_out s1 18fr>>
+교실이 다시 조용해졌다.
+
+<<bg_fade_out bg_main 18fr>>
+<<bg_sprite bg_main staffroom_evening>>
+<<bg_fade_in bg_main 24fr>>
+저녁의 교무실에는 불이 하나만 켜져 있었다.
+
+<<place_center s3 bust 0fr>>
+<<size s3 front bust 0fr>>
+<<fade_in s3 18fr>>
+카스미: 아직 남아 있었구나.
+
+<<place_right s1 bust 0fr>>
+<<size s1 mid bust 0fr>>
+<<face s1 3>>
+<<fade_in s1 14fr>>
+하린: 간판 글씨를 물어보려고요.
+
+<<face s1 5>>
+하린: 어떤 글꼴이 좋을지 모르겠어요.
+
+<<fade_out s3 14fr>>
+<<face s1 2>>
+하린: 선생님은 벌써 가셨나 봐요.
+
+<<place_left s2 bust 0fr>>
+<<size s2 mid bust 0fr>>
+<<face s2 1>>
+<<fade_in s2 14fr>>
+시구레: 하린 선배, 여기 계셨네요.
+
+<<face s2 3>>
+시구레: 미술실 열쇠를 받아 왔어요.
+
+<<face s2 2>>
+시구레: 내일 아침에 같이 가요.
+
+<<fade_out s1 14fr>>
+<<fade_out s2 14fr>>
+교무실의 불도 곧 꺼졌다.
+===
