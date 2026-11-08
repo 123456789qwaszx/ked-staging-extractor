@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- ked-motion-tool의 Mt.Authoring을 화면 없이 쓰는 내보내기 도구.
+       KedMotionToolDir = ked-motion-tool 저장소 경로(기본: 형제 폴더). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <KedMotionToolDir Condition="'$(KedMotionToolDir)' == ''">$(MSBuildThisFileDirectory)../../../ked-motion-tool</KedMotionToolDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(KedMotionToolDir)/src/Mt.Authoring/Mt.Authoring.csproj" />
+  </ItemGroup>
+</Project>
