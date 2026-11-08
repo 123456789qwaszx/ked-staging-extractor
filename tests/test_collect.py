@@ -206,3 +206,117 @@ class DiffAndWriteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+import hashlib as _hashlib
+
+
+def _file(title, path, body, kind="sprites", identity="Mira"):
+    return {"title": title, "path": path, "kind": kind, "identity": identity, "url": "https://static.example/" + path,
+            "sha1": _hashlib.sha1(body).hexdigest(), "size": len(body)}
+
+
+class FakeStatic:
+    def __init__(self, bodies, failures=None):
+        self.bodies = bodies                 # url → 본문
+        self.failures = dict(failures or {})  # url → [(상태, 헤더)]
+        self.calls = []
+
+    def __call__(self, url, headers):
+        self.calls.append(url)
+        assert headers["User-Agent"] == "test-agent"
+        if self.failures.get(url):
+            status, h = self.failures[url].pop(0)
+            return status, h, b""
+        return 200, {}, self.bodies[url]
+
+
+class FetchTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.a = _file("File:Mira a 02.png", "sprites/Mira/Mira_a_02.png", b"AAA")
+        self.b = _file("File:BG park.png", "backgrounds/BG_park.png", b"BBBB", kind="backgrounds", identity=None)
+        self.manifest = {"files": [self.a, self.b]}
+        self.static = FakeStatic({self.a["url"]: b"AAA", self.b["url"]: b"BBBB"})
+        self.sleeps = []
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def fetcher(self):
+        return collect.Fetcher(self.tmp, "test-agent", delay=0, transport=self.static, sleep=self.sleeps.append,
+                               log=lambda m: None, today="2026-11-08")
+
+    def read(self, rel):
+        with open(os.path.join(self.tmp, *rel.split("/")), "rb") as f:
+            return f.read()
+
+    def test_downloads_into_place_and_records(self):
+        r = self.fetcher().fetch(self.manifest)
+        self.assertEqual((len(r["downloaded"]), r["bytes"], r["failed"]), (2, 7, []))
+        self.assertEqual(self.read("sprites/Mira/Mira_a_02.png"), b"AAA")
+        rec = collect.load_json(os.path.join(self.tmp, collect.FETCHED))
+        self.assertEqual(rec["File:BG park.png"]["sha1"], self.b["sha1"])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "sprites", "Mira", "Mira_a_02.png.part")))
+
+    def test_second_run_downloads_nothing(self):
+        self.fetcher().fetch(self.manifest)
+        self.static.calls.clear()
+        r = self.fetcher().fetch(self.manifest)
+        self.assertEqual((r["downloaded"], r["skipped"], self.static.calls), ([], 2, []))
+
+    def test_only_new_files_are_fetched_after_an_update(self):
+        self.fetcher().fetch({"files": [self.a]})
+        self.static.calls.clear()
+        r = self.fetcher().fetch(self.manifest)
+        self.assertEqual(r["downloaded"], ["File:BG park.png"])
+        self.assertEqual(self.static.calls, [self.b["url"]])
+
+    def test_a_changed_picture_keeps_the_old_one_aside(self):
+        self.fetcher().fetch(self.manifest)
+        new = dict(self.a, sha1=_hashlib.sha1(b"NEW!").hexdigest(), size=4)
+        self.static.bodies[new["url"]] = b"NEW!"
+        r = self.fetcher().fetch({"files": [new, self.b]})
+        self.assertEqual(r["downloaded"], ["File:Mira a 02.png"])
+        self.assertEqual(self.read("sprites/Mira/Mira_a_02.png"), b"NEW!")
+        self.assertEqual(self.read("_replaced/2026-11-08/sprites/Mira/Mira_a_02.png"), b"AAA")
+
+    def test_bad_checksum_leaves_nothing_behind(self):
+        self.static.bodies[self.a["url"]] = b"AAX"
+        r = self.fetcher().fetch({"files": [self.a]})
+        self.assertEqual([f["title"] for f in r["failed"]], ["File:Mira a 02.png"])
+        self.assertEqual(os.listdir(self.tmp), [collect.FETCHED])          # 깨진 파일 · .part가 없다
+
+    def test_same_picture_at_a_new_path_is_moved_not_downloaded(self):
+        self.fetcher().fetch({"files": [self.a]})
+        moved = dict(self.a, path="sprites/Firstlight Mira/Mira_a_02.png")
+        self.static.calls.clear()
+        r = self.fetcher().fetch({"files": [moved]})
+        self.assertEqual((r["downloaded"], len(r["moved"]), self.static.calls), ([], 1, []))
+        self.assertEqual(self.read("sprites/Firstlight Mira/Mira_a_02.png"), b"AAA")
+
+    def test_lost_record_is_rebuilt_from_the_file_itself(self):
+        self.fetcher().fetch(self.manifest)
+        os.remove(os.path.join(self.tmp, collect.FETCHED))
+        self.static.calls.clear()
+        r = self.fetcher().fetch(self.manifest)
+        self.assertEqual((r["downloaded"], r["skipped"], self.static.calls), ([], 2, []))
+
+    def test_retries_on_busy_and_reports_hard_failures(self):
+        self.static.failures = {self.a["url"]: [(429, {"retry-after": "3"})], self.b["url"]: [(404, {})]}
+        r = self.fetcher().fetch(self.manifest)
+        self.assertEqual(r["downloaded"], ["File:Mira a 02.png"])
+        self.assertEqual([f["title"] for f in r["failed"]], ["File:BG park.png"])
+        self.assertEqual(self.sleeps, [3.0])
+
+    def test_files_gone_from_the_manifest_are_reported_not_deleted(self):
+        self.fetcher().fetch(self.manifest)
+        r = self.fetcher().fetch({"files": [self.b]})
+        self.assertEqual(r["removed"], ["File:Mira a 02.png"])
+        self.assertEqual(self.read("sprites/Mira/Mira_a_02.png"), b"AAA")
+
+    def test_select(self):
+        files = [dict(self.a), dict(self.b), dict(self.b, kind="cg/main", title="x")]
+        self.assertEqual(len(collect.select(files, kind="cg")), 1)
+        self.assertEqual(len(collect.select(files, identity="Mira")), 1)
+        self.assertEqual(len(collect.select(files, limit=2)), 2)

@@ -311,3 +311,157 @@ def human_bytes(n: int) -> str:
             return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
         n /= 1024.0
     return f"{n}B"
+
+
+# ── 받기(fetch) ─────────────────────────────────────────────────────────────────────────────────────────
+#
+# manifest대로 원본을 받는다. 데이터 폴더의 fetched.json이 받은 기록이다({제목: {path, sha1, size, fetchedAt}}).
+#   - 기록의 SHA-1이 manifest와 같고 파일이 있으면 건너뛴다(5GB를 다시 읽지 않는다)
+#   - 기록이 없는데 파일이 있으면 SHA-1을 재어 같으면 기록만 한다(기록을 잃었을 때)
+#   - 받은 것은 .part에 쓰고 SHA-1 · 크기가 manifest와 같을 때만 제자리로 바꿔 끼운다 — 깨진 파일이 남지 않는다
+#   - 위키에서 그림이 바뀌었으면 옛 판을 _replaced/<날짜>/<경로>로 옮긴 뒤 새 판을 둔다(지우지 않는다)
+#   - 같은 그림이 경로만 바뀌었으면(정체 규칙이 바뀌는 등) 받지 않고 옮긴다
+#   - manifest에서 사라진 파일은 지우지 않고 보고만 한다
+
+import hashlib
+import shutil
+
+FETCHED = "fetched.json"
+
+
+def sha1_of(path: str) -> str:
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def select(files: List[dict], kind: Optional[str] = None, identity: Optional[str] = None,
+           limit: Optional[int] = None) -> List[dict]:
+    """일부만 — 분류 · 정체로 고르고 앞에서 limit개."""
+    out = [f for f in files if (kind is None or f["kind"] == kind or f["kind"].startswith(kind + "/"))
+           and (identity is None or f.get("identity") == identity)]
+    return out[:limit] if limit is not None else out
+
+
+class Fetcher:
+    def __init__(self, data_dir: str, user_agent: str, delay: float = 1.0, transport: Optional[Transport] = None,
+                 sleep: Callable[[float], None] = time.sleep, retries: int = 5, log: Callable[[str], None] = print,
+                 today: Optional[str] = None):
+        self.data = data_dir
+        self.user_agent = user_agent
+        self.delay = delay
+        self.transport = transport or urllib_transport
+        self.sleep = sleep
+        self.retries = retries
+        self.log = log
+        self.today = today or datetime.now().strftime("%Y-%m-%d")
+        path = os.path.join(data_dir, FETCHED)
+        self.record: Dict[str, dict] = load_json(path) if os.path.isfile(path) else {}
+        self._last: Optional[float] = None
+        self._dirty = 0
+
+    def abspath(self, rel: str) -> str:
+        return os.path.join(self.data, *rel.split("/"))
+
+    def save(self) -> None:
+        write_json(os.path.join(self.data, FETCHED), self.record)
+        self._dirty = 0
+
+    def _note(self, f: dict) -> None:
+        self.record[f["title"]] = {"path": f["path"], "sha1": f["sha1"], "size": f["size"], "fetchedAt": _now()}
+        self._dirty += 1
+        if self._dirty >= 25:
+            self.save()
+
+    def _download(self, url: str) -> bytes:
+        for attempt in range(self.retries + 1):
+            if self._last is not None:
+                gap = self.delay - (time.monotonic() - self._last)
+                if gap > 0:
+                    self.sleep(gap)
+            try:
+                status, headers, body = self.transport(url, {"User-Agent": self.user_agent})
+            except (urllib.error.URLError, OSError) as e:      # 연결이 끊김 · 시간 초과
+                status, headers, body, reason = 0, {}, b"", f"연결 오류({e})"
+            else:
+                reason = f"HTTP {status}"
+            self._last = time.monotonic()
+            if status == 200:
+                return body
+            if status not in (0, 429, 500, 502, 503, 504) or attempt == self.retries:
+                raise ApiError(f"{reason}: {url}")
+            wait = _retry_after(headers, attempt)
+            self.log(f"  {reason} — {wait:.0f}초 기다렸다 다시")
+            self.sleep(wait)
+        raise ApiError(f"{self.retries}번 다시 해도 실패: {url}")
+
+    def _set_aside(self, dest: str, rel: str) -> str:
+        """지금 그 자리의 옛 판을 _replaced/<날짜>/<경로>로(이미 있으면 이름 뒤에 번호)."""
+        target = self.abspath("_replaced/" + self.today + "/" + rel)
+        base, ext = os.path.splitext(target)
+        n = 1
+        while os.path.exists(target):
+            target = f"{base}.{n}{ext}"
+            n += 1
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        os.replace(dest, target)
+        return target
+
+    def fetch(self, manifest: dict, files: Optional[List[dict]] = None) -> dict:
+        files = manifest["files"] if files is None else files
+        report = {"downloaded": [], "bytes": 0, "skipped": 0, "moved": [], "replaced": [], "failed": [],
+                  "removed": []}
+        try:
+            for i, f in enumerate(files, 1):
+                self._one(f, report)
+                if i % 50 == 0 or i == len(files):
+                    self.log(f"  {i}/{len(files)} · 받음 {len(report['downloaded'])} ({human_bytes(report['bytes'])})"
+                             f" · 건너뜀 {report['skipped']} · 실패 {len(report['failed'])}")
+        finally:
+            self.save()                                       # Ctrl+C로 멈춰도 받은 데까지는 기록한다
+        listed = {f["title"] for f in manifest["files"]}
+        report["removed"] = sorted(t for t in self.record if t not in listed)
+        return report
+
+    def _one(self, f: dict, report: dict) -> None:
+        title, dest = f["title"], self.abspath(f["path"])
+        rec = self.record.get(title)
+        if rec and rec["sha1"] == f["sha1"] and os.path.isfile(dest) and rec["path"] == f["path"]:
+            report["skipped"] += 1
+            return
+        if rec and rec["sha1"] == f["sha1"] and rec["path"] != f["path"] and os.path.isfile(self.abspath(rec["path"])) \
+                and not os.path.exists(dest):
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            os.replace(self.abspath(rec["path"]), dest)
+            report["moved"].append({"title": title, "from": rec["path"], "to": f["path"]})
+            self._note(f)
+            return
+        if os.path.isfile(dest) and sha1_of(dest) == f["sha1"]:
+            report["skipped"] += 1                              # 기록만 잃었다
+            self._note(f)
+            return
+        try:
+            body = self._download(f["url"])
+        except ApiError as e:
+            report["failed"].append({"title": title, "reason": str(e)})
+            return
+        got = hashlib.sha1(body).hexdigest()
+        if got != f["sha1"] or (f.get("size") is not None and len(body) != f["size"]):
+            report["failed"].append({"title": title, "reason": f"SHA-1 · 크기가 manifest와 다르다(받은 {len(body)}B)"})
+            return
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        part = dest + ".part"
+        with open(part, "wb") as out:
+            out.write(body)
+        if os.path.isfile(dest):
+            report["replaced"].append({"title": title, "old": self._set_aside(dest, f["path"])})
+        os.replace(part, dest)
+        report["downloaded"].append(title)
+        report["bytes"] += len(body)
+        self._note(f)

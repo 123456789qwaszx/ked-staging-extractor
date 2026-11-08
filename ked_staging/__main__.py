@@ -20,7 +20,7 @@
 
   sheet         P5: 엑셀 연출 열 ↔ .yarn (export · apply · check — .yarn이 주인, 엑셀은 고치는 보기)
 
-  originals     원본 수집: MediaWiki 카테고리 → 원본 그림 목록(manifest) — 위키 주소는 설정 파일(private)에
+  originals     원본 수집: manifest(MediaWiki 카테고리 → 원본 그림 목록) · fetch(목록대로 받기) — 설정은 private/에
 
 런타임 저장소는 --runtime(기본: 이 저장소 옆의 ked-presentation-runtime)이다.
 """
@@ -641,6 +641,8 @@ def cmd_originals(args) -> int:
     config = collect.load_json(args.config)
     data_dir = os.path.abspath(args.data)
     path = os.path.join(data_dir, "manifest.json")
+    if args.action == "fetch":
+        return _originals_fetch(args, config, data_dir, path)
     api = collect.Api(config["api"], config.get("userAgent", "ked-originals/0.1"),
                       delay=float(config.get("delay", 1.0)))
     started = time.time()
@@ -670,6 +672,37 @@ def cmd_originals(args) -> int:
     collect.write_json(path, manifest)
     print(f"→ {path}")
     return 0
+
+
+def _originals_fetch(args, config: dict, data_dir: str, path: str) -> int:
+    from . import collect
+
+    if not os.path.isfile(path):
+        print(f"manifest가 없습니다: {path} (먼저 originals manifest)", file=sys.stderr)
+        return 2
+    manifest = collect.load_json(path)
+    files = collect.select(manifest["files"], args.kind, args.identity, args.limit)
+    total = sum(f.get("size") or 0 for f in files)
+    print(f"받을 대상: {len(files)}개 · 최대 {collect.human_bytes(total)} (이미 받은 것은 건너뜀) → {data_dir}")
+    fetcher = collect.Fetcher(data_dir, config.get("userAgent", "ked-originals/0.1"), delay=float(config.get("delay", 1.0)))
+    started = time.time()
+    try:
+        r = fetcher.fetch(manifest, files)
+    except KeyboardInterrupt:
+        print("\n멈췄습니다 — 받은 데까지 기록했습니다. 같은 명령으로 이어서 받습니다.")
+        return 130
+    print(f"\n받음 {len(r['downloaded'])}개 · {collect.human_bytes(r['bytes'])} · 건너뜀 {r['skipped']} · "
+          f"옮김 {len(r['moved'])} · 옛 판 보관 {len(r['replaced'])} · 실패 {len(r['failed'])} ({time.time() - started:.0f}초)")
+    for label, key in (("옮김", "moved"), ("옛 판 보관(_replaced)", "replaced"), ("실패", "failed"),
+                       ("manifest에서 사라짐(지우지 않았다)", "removed")):
+        items = r[key]
+        if items:
+            print(f"{label}: {len(items)}개")
+            for it in items[:args.show]:
+                print(f"  {it}")
+            if len(items) > args.show:
+                print(f"  … 나머지 {len(items) - args.show}개")
+    return 1 if r["failed"] else 0
 
 
 def main(argv=None) -> int:
@@ -817,10 +850,13 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_sheet)
 
     p = sub.add_parser("originals", help="원본 수집: MediaWiki 카테고리 → 원본 그림 목록(manifest)")
-    p.add_argument("action", choices=["manifest"])
+    p.add_argument("action", choices=["manifest", "fetch"])
     p.add_argument("config", help="수집 설정 JSON(위키 주소 · 카테고리 — private 저장소에 둔다)")
     p.add_argument("--data", required=True, help="데이터 폴더(git 밖) — manifest.json과 원본 그림이 여기에")
     p.add_argument("--show", type=int, default=10, help="목록마다 화면에 보일 개수")
+    p.add_argument("--kind", help="fetch: 이 분류만(sprites · backgrounds · cg · cg/main …)")
+    p.add_argument("--identity", help="fetch: 이 정체만(스프라이트)")
+    p.add_argument("--limit", type=int, help="fetch: 앞에서 이만큼만(시험용)")
     p.set_defaults(func=cmd_originals)
 
     p = sub.add_parser("gte-profile", help="게임텍스트추출기 프로필 내기")
