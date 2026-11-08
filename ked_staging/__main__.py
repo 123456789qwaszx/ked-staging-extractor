@@ -20,6 +20,8 @@
 
   sheet         P5: 엑셀 연출 열 ↔ .yarn (export · apply · check — .yarn이 주인, 엑셀은 고치는 보기)
 
+  originals     원본 수집: MediaWiki 카테고리 → 원본 그림 목록(manifest) — 위키 주소는 설정 파일(private)에
+
 런타임 저장소는 --runtime(기본: 이 저장소 옆의 ked-presentation-runtime)이다.
 """
 from __future__ import annotations
@@ -633,6 +635,43 @@ def cmd_gte_profile(args) -> int:
     return 0
 
 
+def cmd_originals(args) -> int:
+    from . import collect
+
+    config = collect.load_json(args.config)
+    data_dir = os.path.abspath(args.data)
+    path = os.path.join(data_dir, "manifest.json")
+    api = collect.Api(config["api"], config.get("userAgent", "ked-originals/0.1"),
+                      delay=float(config.get("delay", 1.0)))
+    started = time.time()
+    try:
+        manifest = collect.build_manifest(config, api)
+    except collect.ApiError as e:
+        print(f"API 오류: {e}", file=sys.stderr)
+        return 2
+    s = manifest["summary"]
+    print(f"\n파일 {s['files']}개 · {collect.human_bytes(s['bytes'])} (요청 {api.requests}번 · {time.time() - started:.0f}초)")
+    for kind, k in sorted(s["kinds"].items()):
+        print(f"  {kind:<14} {k['files']:>6}개  {collect.human_bytes(k['bytes'])}")
+    for label, key in (("규칙 밖 이름", "unparsed"), ("카테고리와 정체가 다름", "mismatched"),
+                       ("다른 카테고리에도 있음", "duplicates"), ("문제", "problems")):
+        items = manifest[key]
+        print(f"{label}: {len(items)}개")
+        for it in items[:args.show]:
+            print(f"  {it}")
+        if len(items) > args.show:
+            print(f"  … 나머지 {len(items) - args.show}개는 manifest.json에")
+    if os.path.isfile(path):
+        d = collect.diff(collect.load_json(path), manifest)
+        print(f"앞 manifest와 견주어: 새 파일 {len(d['added'])} · 바뀐 파일 {len(d['changed'])} · 사라진 파일 {len(d['removed'])}")
+        for key in ("changed", "removed"):
+            for t in d[key][:args.show]:
+                print(f"  {key}: {t}")
+    collect.write_json(path, manifest)
+    print(f"→ {path}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m ked_staging", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -776,6 +815,13 @@ def main(argv=None) -> int:
     p.add_argument("--no-check", action="store_true", help="apply: 커맨드 이름을 오라클 표로 검사하지 않는다")
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)
     p.set_defaults(func=cmd_sheet)
+
+    p = sub.add_parser("originals", help="원본 수집: MediaWiki 카테고리 → 원본 그림 목록(manifest)")
+    p.add_argument("action", choices=["manifest"])
+    p.add_argument("config", help="수집 설정 JSON(위키 주소 · 카테고리 — private 저장소에 둔다)")
+    p.add_argument("--data", required=True, help="데이터 폴더(git 밖) — manifest.json과 원본 그림이 여기에")
+    p.add_argument("--show", type=int, default=10, help="목록마다 화면에 보일 개수")
+    p.set_defaults(func=cmd_originals)
 
     p = sub.add_parser("gte-profile", help="게임텍스트추출기 프로필 내기")
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)
