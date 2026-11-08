@@ -50,8 +50,9 @@ ked-staging-extractor/          ← 이 저장소 (파이썬)
     scan.py        다른 게임(P4) — 영상 → 카탈로그 초안(배경 판 · 인물 조각 · 정체 · 표정 무리)
     catalogdraft.py 초안 고치기(카탈로그 툴과 같은 연산) · 초안 → 카탈로그 + 튜닝 겹본
     motiondraft.py 어휘로 설명 못 한 움직임 → ked-motion-tool 모션 초안(*.motion-authoring.json)
+    sheet.py       엑셀 연출 열 ↔ .yarn(P5 — .yarn이 주인, 엑셀은 무손실로 왕복하는 고치기 보기)
     evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교(상태 · 대사 · 시간 · 어휘)
-  docs/oracle-protocol.md · docs/PLAN-P1.md · docs/P2.md · docs/P3.md · docs/P4.md
+  docs/oracle-protocol.md · docs/PLAN-P1.md · docs/P2.md · docs/P3.md · docs/P4.md · docs/P5.md
   testbed/manifest.example.json · testbed/scenarios/p1_basic.yarn
   RECORDING.md   실제 런타임 녹화 안내(필요할 때)
 
@@ -108,7 +109,11 @@ ked-presentation-runtime/                  ← 튜닝 덤프 · 리소스 · 대
 - [x] `extract --catalog --tuning --box-profile` — P1~P3 그대로. 어휘로 설명 못 한 움직임은 모션 초안(`*.motion-authoring.json`)으로
 - [x] 통과 기준 — '모르는 게임' 녹화(`p4_unknown.yarn`, 이름을 숨긴 시험용 초상)에서 인물 순도 100% · 표정 순도 95% · 줄 일치 90%(짝마다 모양 겹침 0.85), hop 모션 초안 봉우리 ±3px
 
-**P5 엑셀 연출 열 ↔ .yarn — 다음**
+**P5 엑셀 연출 열 ↔ .yarn — 끝(2026-11-08)** · 모양 · 규칙은 [docs/P5.md](docs/P5.md)
+
+- [x] `sheet export` — .yarn → 연출 엑셀(줄마다 연출 · 모션 · 확인 칸, '단위' 시트의 연출 단위로 접기)
+- [x] `sheet apply` — 원래 .yarn + 고친 엑셀 → 새 .yarn(고친 칸만 다시 쓴다, 지문 · 열쇠 · 커맨드 이름 검사)
+- [x] 통과 기준 — 런타임 샘플 대본 14개 · 시험 대본 · 추출 .yarn의 고치지 않은 왕복이 바이트 그대로
 
 ## 설치 (Windows)
 
@@ -190,6 +195,15 @@ py -m ked_staging extract private\게임\영상.mp4 --catalog private\게임\cat
 
 어휘로 설명 못 한 움직임이 있으면 `extract`가 `<영상>.motion-authoring.json`(ked-motion-tool 저작 원본)을 함께 냅니다.
 
+### 엑셀 연출 열 (P5)
+
+```powershell
+py -m ked_staging sheet export extract-out\영상.yarn              # → 영상.연출.xlsx (extract --sheet로도)
+py -m ked_staging sheet apply extract-out\영상.연출.xlsx --in-place  # 고친 칸만 .yarn에(.bak을 남긴다)
+```
+
+.yarn이 값의 주인입니다. 엑셀을 내보낸 뒤 .yarn이 바뀌었으면 들여오지 않습니다(다시 내보내세요). 행을 넣거나 지우지 마세요.
+
 ## 알려진 한계
 
 **P4**
@@ -198,6 +212,10 @@ py -m ked_staging extract private\게임\영상.mp4 --catalog private\게임\cat
 - 다른 인물에 가린 채로만 나온 표정은 보이는 자리에 차이가 없으면 앞 표정과 한 무리가 됩니다(툴에서 나누세요).
 - 모션 초안은 평행 이동만 잽니다(회전 · 배율 없음).
 - 카탈로그 툴은 Windows에서 처음 띄워 보는 것입니다(클라우드에서는 빌드와 헤드리스 점검만 했습니다).
+
+**P5**
+
+- 이 보기에서는 줄 추가 · 삭제와 선택지 고치기를 하지 않습니다. 흐름 커맨드(`<<if>>` 등)와 섞인 행의 연출도 고치지 않습니다.
 
 **P3**
 

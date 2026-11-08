@@ -17,6 +17,8 @@
   catalog-build 초안 → 카탈로그(catalog.json) + 튜닝 겹본(tuning/)
   p4-check      '모르는 게임' 시험 녹화 → scan → catalog-build → extract → 이름을 다수결로 대응시켜 평가
 
+  sheet         P5: 엑셀 연출 열 ↔ .yarn (export · apply · check — .yarn이 주인, 엑셀은 고치는 보기)
+
 런타임 저장소는 --runtime(기본: 이 저장소 옆의 ked-presentation-runtime)이다.
 """
 from __future__ import annotations
@@ -207,8 +209,14 @@ def cmd_extract(args) -> int:
     with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
         layout = BoxLayout.from_gte_profile(args.box_profile, int(oracle.width), int(oracle.height)) \
             if args.box_profile else None
-        extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset,
-                timing=not args.no_timing, layout=layout, motions_path=motions)
+        doc = extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset,
+                      timing=not args.no_timing, layout=layout, motions_path=motions)
+    if args.sheet:
+        from .sheet import export_sheet
+        yarn = doc["files"]["yarn"]
+        out = os.path.splitext(yarn)[0] + ".연출.xlsx"
+        export_sheet(yarn, out)
+        print(f"→ {out}")
     print(f"{time.time() - t0:.0f}초")
     return 0
 
@@ -525,6 +533,67 @@ def cmd_p4_check(args) -> int:
     return 0 if report["pass"] else 1
 
 
+def _known_commands(args) -> Optional[set]:
+    """오라클의 커맨드 표(이름) — 없으면 None(검사를 건너뛴다)."""
+    try:
+        _, tuning, motions = _runtime_paths(args.runtime)
+        with Oracle(tuning, motions, command=[args.oracle] if args.oracle else None) as oracle:
+            return set(oracle.commands())
+    except (OracleError, SystemExit, OSError) as e:
+        print(f"커맨드 이름 검사를 건너뜁니다({e})", file=sys.stderr)
+        return None
+
+
+def cmd_sheet(args) -> int:
+    """P5 — 엑셀 연출 열 ↔ .yarn(.yarn이 주인, 엑셀은 고치는 보기)."""
+    import tempfile
+    from .sheet import SheetError, apply_sheet, export_sheet
+    try:
+        if args.action == "export":
+            for y in args.paths:
+                out = args.output if args.output and len(args.paths) == 1 else os.path.splitext(y)[0] + ".연출.xlsx"
+                n = export_sheet(y, out)
+                print(f"{y} → {out} (행 {n})")
+            return 0
+        if args.action == "apply":
+            known = None if args.no_check else _known_commands(args)
+            text, changed = apply_sheet(args.paths[0], args.yarn, force=args.force, known_commands=known)
+            if not changed:
+                print("바뀐 칸이 없습니다 — .yarn을 그대로 둡니다")
+                return 0
+            target = args.output
+            if target is None:
+                if not args.in_place:
+                    print("고친 .yarn을 어디에 쓸지: -o <경로> 또는 --in-place(원래 .yarn을 고치고 .bak을 남긴다)", file=sys.stderr)
+                    return 2
+                from .sheet import read_sheet
+                target = args.yarn or read_sheet(args.paths[0])[0]["yarn"]
+                with open(target, encoding="utf-8", newline="") as f:
+                    old = f.read()
+                with open(target + ".bak", "w", encoding="utf-8", newline="") as f:
+                    f.write(old)
+            with open(target, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+            print(f"바뀐 행 {len(changed)}: {', '.join(changed[:12])}{' …' if len(changed) > 12 else ''} → {target}")
+            return 0
+        # check: 고치지 않은 왕복이 바이트 그대로인가
+        bad = 0
+        with tempfile.TemporaryDirectory() as tmp:
+            for y in args.paths:
+                x = os.path.join(tmp, "t.xlsx")
+                export_sheet(y, x)
+                with open(y, encoding="utf-8", newline="") as f:
+                    original = f.read()
+                text, changed = apply_sheet(x, y)
+                ok = text == original and not changed
+                bad += not ok
+                print(f"{'왕복 그대로' if ok else '왕복이 다르다'}: {y}")
+        return 1 if bad else 0
+    except SheetError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+
+
 def cmd_gte_profile(args) -> int:
     from .dialogue import BoxLayout, gte_profile
     _, tuning, _ = _runtime_paths(args.runtime)
@@ -594,6 +663,7 @@ def main(argv=None) -> int:
     p.add_argument("--no-timing", action="store_true", help="시간 · 이징을 재지 않는다(P1 결과만)")
     p.add_argument("--tuning", help="튜닝 폴더(다른 게임: catalog-build가 만든 겹본)")
     p.add_argument("--box-profile", help="대사창 자리를 게임텍스트추출기 프로필에서(다른 게임)")
+    p.add_argument("--sheet", action="store_true", help="추출 .yarn의 연출 엑셀(<영상>.연출.xlsx)도 낸다(P5)")
     p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("evaluate", help="추출 결과를 정답과 비교")
@@ -653,6 +723,17 @@ def main(argv=None) -> int:
     p.add_argument("--size", default="1280x720")
     p.add_argument("--verbose", action="store_true")
     p.set_defaults(func=cmd_p4_check)
+
+    p = sub.add_parser("sheet", help="P5: 엑셀 연출 열 ↔ .yarn(export · apply · check)")
+    p.add_argument("action", choices=["export", "apply", "check"])
+    p.add_argument("paths", nargs="+", help="export · check: .yarn들 · apply: 연출 엑셀")
+    p.add_argument("-o", "--output", help="export: 엑셀 경로 · apply: 새 .yarn 경로")
+    p.add_argument("--yarn", help="apply: 원래 .yarn(기본: 엑셀 '정보' 시트의 경로)")
+    p.add_argument("--in-place", action="store_true", help="apply: 원래 .yarn을 고친다(.bak을 남긴다)")
+    p.add_argument("--force", action="store_true", help="apply: 내보낸 뒤 .yarn이 바뀌었어도 들여온다")
+    p.add_argument("--no-check", action="store_true", help="apply: 커맨드 이름을 오라클 표로 검사하지 않는다")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.set_defaults(func=cmd_sheet)
 
     p = sub.add_parser("gte-profile", help="게임텍스트추출기 프로필 내기")
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)
