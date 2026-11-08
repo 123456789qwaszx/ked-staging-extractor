@@ -334,8 +334,10 @@ def detect_effects(oracle: Oracle, catalog: Catalog, tuning_dir: str, observer: 
 def extract(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str, out_dir: str,
             text_xlsx: Optional[str] = None, node: str = "Extracted", preset: str = "bottom",
             log: Callable[[str], None] = print, timing: bool = True, vocab: bool = True,
-            motions_path: Optional[str] = None, layout: Optional[BoxLayout] = None) -> dict:
-    """layout: 대사창 자리(기본: 런타임 surface-layout 프리셋). 다른 게임은 게임텍스트추출기 프로필에서(P4)."""
+            motions_path: Optional[str] = None, layout: Optional[BoxLayout] = None,
+            lines_from_text: bool = False) -> dict:
+    """layout: 대사창 자리(기본: 런타임 surface-layout 프리셋). 다른 게임은 게임텍스트추출기 프로필에서(P4).
+    lines_from_text: 줄을 대사 엑셀의 줄(읽은 순간)로 세운다 — 잉크 줄 경계가 흔들리는 게임용."""
     os.makedirs(out_dir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(video))[0]
     if layout is None:
@@ -347,6 +349,12 @@ def extract(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str, out_d
 
     if text_xlsx:
         rows = read_xlsx(text_xlsx)
+        if lines_from_text:
+            from .gte import DIALOGUE_KINDS
+            from .lines import spans_from_text
+            said = [r.t for r in rows if r.kind in DIALOGUE_KINDS]
+            spans = spans_from_text(spans, said, track.times[-1] if track.times else 0.0)
+            log(f"줄을 대사 엑셀로 다시 세움 → {len(spans)}개")
         texts = attach([s.head for s in spans], [s.end for s in spans], rows)
         log(f"대사 엑셀 {len(rows)}줄 → 붙은 줄 {sum(bool(t.rows) for t in texts)}/{len(spans)}")
     else:
@@ -356,7 +364,8 @@ def extract(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str, out_d
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     cap.release()
     wanted = [settled_times(s, fps) for s in spans]
-    frames = grab_frames(video, wanted)
+    # 정착 화면은 8비트로 들고 있는다 — 1080p 줄 수십 장을 float32로 쥐면 수 GB다(평균의 반올림 차는 0.5 아래).
+    frames = [None if f is None else np.clip(f + 0.5, 0, 255).astype(np.uint8) for f in grab_frames(video, wanted)]
 
     if motions_path is None:
         guess = os.path.join(os.path.dirname(os.path.abspath(tuning_dir)), "Assets", "Dialogue", "motions.json")

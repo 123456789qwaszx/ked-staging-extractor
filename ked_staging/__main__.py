@@ -15,6 +15,7 @@
   scan          다른 게임(P4): 영상 → 카탈로그 초안(draft.json — 배경 판 · 인물 조각 · 정체 · 표정 무리)
   draft         초안 보기 · 고치기(카탈로그 툴과 같은 연산)
   catalog-build 초안 → 카탈로그(catalog.json) + 튜닝 겹본(tuning/)
+  catalog-originals 그 게임의 원본 스프라이트 · 배경 + scan 초안 → 카탈로그 + 튜닝 겹본(원본 모드)
   p4-check      '모르는 게임' 시험 녹화 → scan → catalog-build → extract → 이름을 다수결로 대응시켜 평가
 
   sheet         P5: 엑셀 연출 열 ↔ .yarn (export · apply · check — .yarn이 주인, 엑셀은 고치는 보기)
@@ -210,7 +211,8 @@ def cmd_extract(args) -> int:
         layout = BoxLayout.from_gte_profile(args.box_profile, int(oracle.width), int(oracle.height)) \
             if args.box_profile else None
         doc = extract(args.video, oracle, cat, tuning, args.out, args.text, node=args.node, preset=args.preset,
-                      timing=not args.no_timing, layout=layout, motions_path=motions)
+                      timing=not args.no_timing, layout=layout, motions_path=motions,
+                      lines_from_text=args.lines_from_text)
     if args.sheet:
         from .sheet import export_sheet
         yarn = doc["files"]["yarn"]
@@ -387,7 +389,7 @@ def cmd_scan(args) -> int:
         raise SystemExit(f"영상을 열지 못했습니다: {args.video}")
     layout = BoxLayout.from_gte_profile(args.box_profile, vw, vh)
     t0 = time.time()
-    scan(args.video, layout, args.out, args.box_profile)
+    scan(args.video, layout, args.out, args.box_profile, pieces=not args.plates_only)
     print(f"{time.time() - t0:.0f}초 — 카탈로그 툴(컴포지터 src/Vn.CatalogTool) 또는 `draft`로 고친 뒤 catalog-build")
     return 0
 
@@ -435,6 +437,16 @@ def cmd_draft(args) -> int:
         print(f"뺀 조각: {' '.join(out)}")
     for b in ed.backgrounds:
         print(f"배경 {b['key']}{' (뺌)' if b.get('excluded') else ''}: 줄 {len(b.get('lines', []))}개")
+    return 0
+
+
+def cmd_catalog_originals(args) -> int:
+    from .originals import build_from_originals
+    _, tuning, _ = _runtime_paths(args.runtime)
+    t0 = time.time()
+    path, overlay = build_from_originals(args.originals, args.draft, args.out, tuning,
+                                         [args.oracle] if args.oracle else None)
+    print(f"{time.time() - t0:.0f}초 — 추출: extract <영상> --catalog {path} --tuning {overlay} --box-profile <프로필>")
     return 0
 
 
@@ -490,9 +502,26 @@ def cmd_p4_check(args) -> int:
         json.dump(gte_profile(layout, "모르는 게임(시험)"), f, ensure_ascii=False, indent=2)
     print(f"시험 녹화: 줄 {len(lines)} · {truth['duration']:.1f}초")
     vw, vh = _size(args.size)
-    scan(video, BoxLayout.from_gte_profile(profile, vw, vh), os.path.join(args.out, "draft"), profile, log=print)
-    cat_path, overlay = build_catalog(os.path.join(args.out, "draft"), os.path.join(args.out, "catalog"), tuning, cmd,
-                                      log=print)
+    scan(video, BoxLayout.from_gte_profile(profile, vw, vh), os.path.join(args.out, "draft"), profile, log=print,
+         pieces=not args.originals)
+    if args.originals:
+        # 원본 모드: 시험용 초상 · 런타임 배경을 '그 게임의 원본'처럼 <이름>_<변형>_<표정>.png · BG_<키>.png로 둔다.
+        # 이름은 런타임 견본과 겹치지 않게 바꾼다(Game*) — 평가는 정답 대본을 이 겹본으로 접으므로, 같은 이름이면
+        # 정답 인물의 치수가 원본 그림의 치수로 덮여 정답 모양이 틀어진다. 이름 대응은 다수결로 한다.
+        from .imageio import read_image, write_image
+        from .originals import build_from_originals
+        odir = os.path.join(args.out, "originals")
+        os.makedirs(odir, exist_ok=True)
+        for p in cat.portraits:
+            write_image(os.path.join(odir, f"Game{p.character.capitalize()}_{p.variant}_{p.emotion}.png"),
+                        read_image(cat.abspath(p.path), alpha=True))
+        for b in cat.backgrounds:
+            write_image(os.path.join(odir, f"BG_game_{b.key}.png"), read_image(cat.abspath(b.path)))
+        cat_path, overlay = build_from_originals(odir, os.path.join(args.out, "draft"),
+                                                 os.path.join(args.out, "catalog"), tuning, cmd, log=print)
+    else:
+        cat_path, overlay = build_catalog(os.path.join(args.out, "draft"), os.path.join(args.out, "catalog"), tuning,
+                                          cmd, log=print)
     got_cat = Catalog.load(cat_path)
     with Oracle(overlay, motions, command=cmd) as oracle:
         box = BoxLayout.from_gte_profile(profile, int(oracle.width), int(oracle.height))
@@ -664,6 +693,8 @@ def main(argv=None) -> int:
     p.add_argument("--tuning", help="튜닝 폴더(다른 게임: catalog-build가 만든 겹본)")
     p.add_argument("--box-profile", help="대사창 자리를 게임텍스트추출기 프로필에서(다른 게임)")
     p.add_argument("--sheet", action="store_true", help="추출 .yarn의 연출 엑셀(<영상>.연출.xlsx)도 낸다(P5)")
+    p.add_argument("--lines-from-text", action="store_true",
+                   help="줄을 --text 엑셀의 대사 줄로 세운다(대사창이 줄 사이에 글자를 지웠다 쓰는 게임 — 헛줄 · 붙은 줄을 막는다)")
     p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("evaluate", help="추출 결과를 정답과 비교")
@@ -699,6 +730,8 @@ def main(argv=None) -> int:
     p.add_argument("video")
     p.add_argument("--box-profile", required=True, help="그 게임의 게임텍스트추출기 프로필(대사창 자리)")
     p.add_argument("--out", default="draft")
+    p.add_argument("--plates-only", action="store_true",
+                   help="줄 · 배경 판까지만(인물을 배우지 않는다 — 원본 스프라이트로 catalog-originals를 쓸 때)")
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("draft", help="P4: 초안 보기 · 고치기")
@@ -716,12 +749,21 @@ def main(argv=None) -> int:
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)
     p.set_defaults(func=cmd_catalog_build)
 
+    p = sub.add_parser("catalog-originals", help="P4: 원본 스프라이트 · 배경으로 카탈로그 + 튜닝 겹본")
+    p.add_argument("originals", help="원본 폴더(<이름>_<변형>_<표정>.png · BG_<이름>.png)")
+    p.add_argument("--draft", required=True, help="scan 초안 폴더(줄 정착 화면 · 배경 판을 쓴다)")
+    p.add_argument("--out", default="catalog")
+    p.add_argument("--runtime", default=DEFAULT_RUNTIME)
+    p.set_defaults(func=cmd_catalog_originals)
+
     p = sub.add_parser("p4-check", help="P4 점검('모르는 게임' 녹화 → scan → catalog-build → extract → 평가)")
     p.add_argument("yarn", nargs="*")
     p.add_argument("--runtime", default=DEFAULT_RUNTIME)
     p.add_argument("--out", default="p4-check-out")
     p.add_argument("--size", default="1280x720")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--originals", action="store_true",
+                   help="원본 모드 점검 — 시험용 초상 · 배경을 원본으로 주고 catalog-originals로 카탈로그를 만든다")
     p.set_defaults(func=cmd_p4_check)
 
     p = sub.add_parser("sheet", help="P5: 엑셀 연출 열 ↔ .yarn(export · apply · check)")

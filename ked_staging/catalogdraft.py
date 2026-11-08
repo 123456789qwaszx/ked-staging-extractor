@@ -348,16 +348,16 @@ class _Identity:
         return float(np.median([t[0] for t in best])), float(np.median([t[1] for t in best]))
 
 
-def _slot_line(character: str, variant: str, place: str, focus: str, depth: str) -> List[dict]:
+def _slot_line(character: str, variant: str, place: str, focus: str, depth: str, emotion: str = "1") -> List[dict]:
     return [{"name": "slot", "args": ["s1", "stage00", "mid"]},
-            {"name": "cast", "args": ["s1", character, variant, "1"]},
+            {"name": "cast", "args": ["s1", character, variant, emotion]},
             {"name": f"place_{place}", "args": ["s1", focus, "0fr"]},
             {"name": "size", "args": ["s1", depth, focus, "0fr"]},
             {"name": "fade_in", "args": ["s1", "0fr"]}]
 
 
-def _slot(oracle, character: str, variant: str, place: str, focus: str, depth: str) -> dict:
-    snap = oracle.fold([_slot_line(character, variant, place, focus, depth)])[0]
+def _slot(oracle, character: str, variant: str, place: str, focus: str, depth: str, emotion: str = "1") -> dict:
+    snap = oracle.fold([_slot_line(character, variant, place, focus, depth, emotion)])[0]
     return next(s for s in snap.slots if s["key"] == "s1")
 
 

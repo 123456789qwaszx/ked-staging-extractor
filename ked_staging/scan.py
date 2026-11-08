@@ -525,8 +525,9 @@ def split_blob(c: Piece, r: Piece, at: Tuple[int, int], unit: float) -> Optional
 # ── 훑기 ──────────────────────────────────────────────────────
 
 def scan(video: str, layout, out_dir: str, box_profile: Optional[str] = None,
-         log: Callable[[str], None] = print) -> Draft:
-    """영상 → 초안 폴더(draft.json · frames/ · bg/ · obs/). layout: 영상 크기의 BoxLayout(대사창 자리)."""
+         log: Callable[[str], None] = print, pieces: bool = True) -> Draft:
+    """영상 → 초안 폴더(draft.json · frames/ · bg/ · obs/). layout: 영상 크기의 BoxLayout(대사창 자리).
+    pieces=False면 줄 · 정착 화면 · 배경 판까지만 낸다 — 원본 스프라이트가 있을 때(catalog-originals)는 인물을 배우지 않는다."""
     from .lines import detect_lines, track_ink
     from .pipeline import grab_frames, settled_times
 
@@ -577,6 +578,11 @@ def scan(video: str, layout, out_dir: str, box_profile: Optional[str] = None,
         for i in members:
             draft.lines[i]["background"] = key
     log(f"배경 판 {len(keys)}개")
+
+    if not pieces:
+        path = draft.save(out_dir)
+        log(f"줄 · 배경 판만 냈습니다(인물 조각 없음) → {path}")
+        return draft
 
     # 인물 조각
     pieces: List[Piece] = []

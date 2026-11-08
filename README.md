@@ -50,6 +50,7 @@ ked-staging-extractor/          ← 이 저장소 (파이썬)
     scan.py        다른 게임(P4) — 영상 → 카탈로그 초안(배경 판 · 인물 조각 · 정체 · 표정 무리)
     catalogdraft.py 초안 고치기(카탈로그 툴과 같은 연산) · 초안 → 카탈로그 + 튜닝 겹본
     motiondraft.py 어휘로 설명 못 한 움직임 → ked-motion-tool 모션 초안(*.motion-authoring.json)
+    originals.py   원본 모드 — 그 게임의 원본 스프라이트 · 배경이 있으면 영상에서 배우지 않고 원본으로 카탈로그
     sheet.py       엑셀 연출 열 ↔ .yarn(P5 — .yarn이 주인, 엑셀은 무손실로 왕복하는 고치기 보기)
     evaluate.py    평가 — 추출 .yarn을 다시 접어 정답과 줄마다 비교(상태 · 대사 · 시간 · 어휘)
   docs/oracle-protocol.md · docs/PLAN-P1.md · docs/P2.md · docs/P3.md · docs/P4.md · docs/P5.md
@@ -194,6 +195,15 @@ py -m ked_staging extract private\게임\영상.mp4 --catalog private\게임\cat
 ```
 
 어휘로 설명 못 한 움직임이 있으면 `extract`가 `<영상>.motion-authoring.json`(ked-motion-tool 저작 원본)을 함께 냅니다.
+
+원본 그림(`<이름>_<변형>_<표정>.png` · `BG_<이름>.png`)이 있으면 배우지 말고 원본으로 만드세요(원본 모드, docs/P4.md):
+
+```powershell
+py -m ked_staging scan private\게임\영상.mp4 --box-profile private\게임\게임.gte-profile.json --out private\게임\draft --plates-only
+py -m ked_staging catalog-originals private\게임\원본 --draft private\게임\draft --out private\게임\catalog
+py -m ked_staging extract private\게임\영상.mp4 --catalog private\게임\catalog\catalog.json --tuning private\게임\catalog\tuning `
+  --box-profile private\게임\게임.gte-profile.json --text private\게임\영상_텍스트.xlsx --lines-from-text --sheet --out private\게임\extract
+```
 
 ### 엑셀 연출 열 (P5)
 

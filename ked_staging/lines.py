@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -168,3 +168,28 @@ def detect_lines(track: InkTrack, min_gap: float = 0.25) -> List[LineSpan]:
         spans.append(LineSpan(track.times[i] - 0.5 * step, track.times[typed_i], end_t, kind,
                               int(track.ink[typed_i])))
     return spans
+
+
+def spans_from_text(spans: Sequence[LineSpan], times: Sequence[float], video_end: float,
+                    reach: float = 2.5, lead: float = 0.4) -> List[LineSpan]:
+    """게임텍스트추출기가 읽은 순간(대사 줄마다 하나)으로 줄을 다시 세운다 — 대사창이 줄 사이에 글자를 지웠다
+    다시 쓰는 게임에서는 잉크로 잡은 줄이 짧은 헛줄로 쪼개지거나 이어 붙는다. 줄 머리는 읽은 순간 앞 reach초 안의
+    잉크 줄 머리 가운데 가장 늦은 것(없으면 읽은 순간 lead초 앞), 끝은 다음 줄 머리다."""
+    merged: List[float] = []
+    for t in sorted(times):
+        if not merged or t - merged[-1] >= 0.3:      # 같은 대사를 거듭 읽은 것은 한 줄
+            merged.append(t)
+    times = merged
+    heads: List[float] = []
+    for t in times:
+        cand = [s.head for s in spans if t - reach <= s.head <= t]
+        h = max(cand) if cand else t - lead
+        if heads and h <= heads[-1]:
+            h = min(t, heads[-1] + 0.05)
+        heads.append(h)
+    out = []
+    for k, (h, t) in enumerate(zip(heads, times)):
+        end = heads[k + 1] if k + 1 < len(heads) else max(t + 0.5, max((s.end for s in spans), default=video_end))
+        ink = max((s.ink for s in spans if h - 0.05 <= s.head <= end), default=0)
+        out.append(LineSpan(h, min(t, end), end, "text", int(ink)))
+    return out

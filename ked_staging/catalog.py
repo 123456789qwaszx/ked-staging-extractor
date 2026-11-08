@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -24,6 +25,7 @@ import numpy as np
 from .imageio import read_image
 
 SCHEMA = "ked-staging-catalog/1"
+IMAGE_CACHE = 24          # 원래 크기 그림을 이만큼만 쥔다(원본 초상 수십 장이면 1GB를 넘는다) — 줄인 그림은 Painter가 따로 쥔다
 
 # 런타임 저장소 안에서 리소스를 찾는 자리 (ResourcesSpriteResolver 규약: 초상 <캐릭터>/<변형>/<표정>.png, 배경 Backgrounds/<키>.png)
 RUNTIME_PORTRAIT_DIRS = ["Assets/Samples/Content/Portraits", "Assets/Samples/Portraits"]
@@ -63,7 +65,7 @@ class Catalog:
     root: str
     portraits: List[Portrait] = field(default_factory=list)
     backgrounds: List[Background] = field(default_factory=list)
-    _cache: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
+    _cache: "OrderedDict[str, np.ndarray]" = field(default_factory=OrderedDict, repr=False)
 
     # ── 조회 ──
     def portrait(self, character: str, variant: str, emotion: str) -> Optional[Portrait]:
@@ -88,6 +90,10 @@ class Catalog:
             if img is None:
                 raise FileNotFoundError(path)
             self._cache[path] = img
+            while len(self._cache) > IMAGE_CACHE:
+                self._cache.popitem(last=False)
+        else:
+            self._cache.move_to_end(path)
         return img
 
     def abspath(self, path: str) -> str:
