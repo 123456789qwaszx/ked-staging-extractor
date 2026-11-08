@@ -42,11 +42,14 @@ MIN_OVERLAP = 0.5             # 맞댈 때 작은 조각의 이만큼은 겹쳐�
 ALIGN_REFINE = 2              # 영상 화소에서 다듬는 범위(±px)
 DIFF_THRESHOLD = 24.0         # 판과 이만큼(채널 최대) 다르면 인물 화소
 MIN_PIECE = 0.003             # 무대 넓이 대비 조각 최소 넓이
-SAME_BACKGROUND = 0.5         # 무대 화소의 이만큼이 같으면 같은 배경
+SAME_BACKGROUND = 0.15        # 무대에서 어둡지 않은 화소의 이만큼이 같으면 같은 배경(인물이 무대 대부분을 덮어도)
 PIXEL_SAME = 14.0             # 배경 묶기에서 '같은 화소'의 차
 CONTAIN = 0.9                 # 단독 조각의 이만큼이 덩어리에 들어맞으면 그 덩어리 안의 앞 인물
 SPLIT_REST = 0.15             # 들어맞은 나머지가 덩어리의 이만큼은 돼야 나눈다
 SHAPE_PENALTY = 50.0 ** 2     # 맞대기에서 모양이 어긋난 화소 하나의 값(회색조 차의 제곱)
+WHOLE_FRAME = 0.6             # 판과 다른 덩어리가 무대의 이만큼을 넘으면 화면 전체가 바뀐 것(카메라 · 전환)
+FRONT_MIN = 0.25              # 덩어리 안 앞 인물로 볼 단독 조각은 덩어리 넓이의 이만큼은 돼야 한다
+FRONT_HEIGHT = 0.6            # …그리고 덩어리 높이의 이만큼은 돼야 한다(손 · 무기 · 작은 조각이 앞 인물이 되지 않게)
 
 
 # ── 조각 ──────────────────────────────────────────────────────
@@ -362,7 +365,12 @@ def _small(frame: np.ndarray, bottom: int, width: int = 160) -> np.ndarray:
 
 
 def _same_fraction(a: np.ndarray, b: np.ndarray) -> float:
-    return float((np.abs(a - b).max(2) < PIXEL_SAME).mean())
+    """같은 화소의 비율 — 둘 다 거의 검은 화소는 세지 않는다(어두운 전환 · 메뉴 · 어두운 장면이 다리가 되지 않게)."""
+    informative = np.maximum(a.mean(2), b.mean(2)) > 28.0
+    n = int(informative.sum())
+    if n == 0:
+        return 0.0
+    return float(((np.abs(a - b).max(2) < PIXEL_SAME) & informative).sum() / n)
 
 
 def _is_blank(small: np.ndarray) -> bool:
@@ -410,24 +418,31 @@ def _kernel(size: int) -> np.ndarray:
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
 
 
-def build_plate(frames: Sequence[np.ndarray], seeds: Sequence[int], bottom: int, unit: float) -> np.ndarray:
-    """씨앗 줄의 중앙값 → 판과 다른 자리를 가린 중앙값(두 번). 가린 자리만 남은 화소는 앞 판 값을 둔다."""
-    stack = np.stack([frames[i] for i in seeds])
-    plate = np.median(stack, axis=0).astype(np.float32)
+def build_plate(frames: Sequence[np.ndarray], seeds: Sequence[int], bottom: int, unit: float,
+                strip: int = 96) -> np.ndarray:
+    """씨앗 줄의 중앙값 → 판과 다른 자리를 가린 중앙값(두 번). 가린 자리만 남은 화소는 앞 판 값을 둔다.
+    중앙값은 가로 띠마다 낸다 — 1080p 줄 수십 장을 한꺼번에 쌓지 않는다."""
+    import warnings
+    h = frames[0].shape[0]
+    plate = np.empty_like(frames[0])
+    for y0 in range(0, h, strip):
+        plate[y0:y0 + strip] = np.median(np.stack([frames[i][y0:y0 + strip] for i in seeds]), axis=0)
     grow = _kernel(9 * unit)
     for _ in range(2):
-        masked = []
+        masks = []
         for f in frames:
-            m = np.zeros(f.shape[:2], bool)
+            m = np.zeros(f.shape[:2], np.uint8)
             m[:bottom] = _diff(f[:bottom], plate[:bottom]) > DIFF_THRESHOLD
-            m = cv2.dilate(m.astype(np.uint8), grow).astype(bool)
-            masked.append(np.where(m[:, :, None], np.nan, f))
-        with np.errstate(all="ignore"):
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                med = np.nanmedian(np.stack(masked), axis=0)
-        plate = np.where(np.isnan(med), plate, med).astype(np.float32)
+            masks.append(cv2.dilate(m, grow).astype(bool))
+        new = plate.copy()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            for y0 in range(0, h, strip):
+                stack = np.stack([np.where(m[y0:y0 + strip, :, None], np.nan, f[y0:y0 + strip])
+                                  for f, m in zip(frames, masks)])
+                med = np.nanmedian(stack, axis=0)
+                new[y0:y0 + strip] = np.where(np.isnan(med), plate[y0:y0 + strip], med)
+        plate = new
     return plate
 
 
@@ -447,6 +462,8 @@ def find_pieces(frame: np.ndarray, plate: np.ndarray, bottom: int, unit: float
         x, y, bw, bh, area = stats[k]
         if area < min_area:
             continue
+        if area > WHOLE_FRAME * w * bottom or (bw > 0.9 * w and bh < 0.3 * bottom):
+            continue    # 화면 전체가 바뀜(카메라 이동 · 전환 · 레터박스 띠) — 인물 조각이 아니다
         comp = (labels[y:y + bh, x:x + bw] == k).astype(np.uint8)
         # 덩어리 안의 작은 구멍(배경과 색이 비슷한 자리)을 메운다 — 큰 구멍(팔과 몸 사이)은 둔다.
         filled = comp.copy()
@@ -466,7 +483,7 @@ def find_pieces(frame: np.ndarray, plate: np.ndarray, bottom: int, unit: float
 
 def _contained(c: Piece, r: Piece) -> Optional[Tuple[int, int, int]]:
     """단독 조각 r이 덩어리 c 안에 통째로 들어맞나 → (x, y, 맞은 화소 수). 아니면 None."""
-    if r.area >= 0.9 * c.area:
+    if r.area >= 0.9 * c.area or r.area < FRONT_MIN * c.area or r.mask.shape[0] < FRONT_HEIGHT * c.mask.shape[0]:
         return None
     found = align(c, r, scale=WORK_SCALE, min_overlap=0.8)
     if found is None:
@@ -570,11 +587,14 @@ def scan(video: str, layout, out_dir: str, box_profile: Optional[str] = None,
             continue
         for (x, y, w, h), m, edge in find_pieces(f, plates[g], bottom, unit):
             pieces.append(Piece(f[y:y + h, x:x + w].copy(), m))
-            records.append({"line": i, "bbox": (x, y, w, h), "edge": edge, "split": False})
+            records.append({"line": i, "bbox": (x, y, w, h), "edge": edge, "split": False, "front": False})
 
     # 겹친 덩어리 나누기 — 다른 줄의 온전한(끝에 안 닿은) 단독 조각이 통째로 들어맞으면 앞 인물이다.
     k = 0
     while k < len(pieces):
+        if records[k]["front"]:
+            k += 1          # 나눠 낸 앞 인물은 다시 나누지 않는다(통째로 들어맞은 조각이다)
+            continue
         best = None
         for j, r in enumerate(pieces):
             if j == k or records[j]["line"] == records[k]["line"] or records[j]["edge"] or records[j]["split"]:
@@ -595,7 +615,8 @@ def scan(video: str, layout, out_dir: str, box_profile: Optional[str] = None,
                     bbox = (int(x + px0), int(y + py0), int(px1 - px0), int(py1 - py0))
                     edge = bbox[0] <= 0 or bbox[1] <= 0 or bbox[0] + bbox[2] >= vw
                     new.append((Piece(c.color[py0:py1, px0:px1].copy(), sub),
-                                {"line": rec["line"], "bbox": bbox, "edge": bool(edge), "split": is_back}))
+                                {"line": rec["line"], "bbox": bbox, "edge": bool(edge), "split": is_back,
+                                 "front": not is_back}))
                 pieces[k:k + 1] = [p for p, _ in new]
                 records[k:k + 1] = [r for _, r in new]
                 log(f"  줄 {rec['line']}: 겹친 덩어리를 둘로 나눔")
