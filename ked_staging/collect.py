@@ -352,8 +352,10 @@ def select(files: List[dict], kind: Optional[str] = None, identity: Optional[str
 class Fetcher:
     def __init__(self, data_dir: str, user_agent: str, delay: float = 1.0, transport: Optional[Transport] = None,
                  sleep: Callable[[float], None] = time.sleep, retries: int = 5, log: Callable[[str], None] = print,
-                 today: Optional[str] = None):
+                 today: Optional[str] = None, record_dir: Optional[str] = None):
         self.data = data_dir
+        # 받은 기록(fetched.json)의 자리 — 그림은 데이터 폴더(git 밖), 기록은 비공개 저장소(db/)에 둘 수 있다. 기본은 데이터 폴더.
+        self.record_dir = record_dir or data_dir
         self.user_agent = user_agent
         self.delay = delay
         self.transport = transport or urllib_transport
@@ -361,7 +363,7 @@ class Fetcher:
         self.retries = retries
         self.log = log
         self.today = today or datetime.now().strftime("%Y-%m-%d")
-        path = os.path.join(data_dir, FETCHED)
+        path = os.path.join(self.record_dir, FETCHED)
         self.record: Dict[str, dict] = load_json(path) if os.path.isfile(path) else {}
         self._last: Optional[float] = None
         self._dirty = 0
@@ -370,7 +372,7 @@ class Fetcher:
         return os.path.join(self.data, *rel.split("/"))
 
     def save(self) -> None:
-        write_json(os.path.join(self.data, FETCHED), self.record)
+        write_json(os.path.join(self.record_dir, FETCHED), self.record)
         self._dirty = 0
 
     def _note(self, f: dict) -> None:

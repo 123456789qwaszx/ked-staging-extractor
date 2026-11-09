@@ -259,6 +259,22 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(rec["File:BG park.png"]["sha1"], self.b["sha1"])
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "sprites", "Mira", "Mira_a_02.png.part")))
 
+    def test_record_can_live_apart_from_pictures(self):
+        # 그림은 데이터 폴더(git 밖), 받은 기록은 비공개 저장소의 db/ — record_dir
+        db = tempfile.mkdtemp()
+        try:
+            f = collect.Fetcher(self.tmp, "test-agent", delay=0, transport=self.static, sleep=self.sleeps.append,
+                                log=lambda m: None, today="2026-11-08", record_dir=db)
+            f.fetch(self.manifest)
+            self.assertEqual(self.read("sprites/Mira/Mira_a_02.png"), b"AAA")
+            self.assertTrue(os.path.isfile(os.path.join(db, collect.FETCHED)))
+            self.assertFalse(os.path.exists(os.path.join(self.tmp, collect.FETCHED)))
+            again = collect.Fetcher(self.tmp, "test-agent", delay=0, transport=self.static, sleep=self.sleeps.append,
+                                    log=lambda m: None, today="2026-11-08", record_dir=db).fetch(self.manifest)
+            self.assertEqual(len(again["downloaded"]), 0, "기록을 db/에서 읽어 건너뛴다")
+        finally:
+            shutil.rmtree(db, ignore_errors=True)
+
     def test_second_run_downloads_nothing(self):
         self.fetcher().fetch(self.manifest)
         self.static.calls.clear()
