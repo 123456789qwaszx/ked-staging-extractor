@@ -24,8 +24,8 @@ from .catalog import Catalog
 from .ease import EaseTable
 from .observe import Painter, robust_error
 from .oracle import Oracle, Snapshot
+from .tokens import FPS
 
-FPS = 24.0
 MOVE = {"place_left", "place_center", "place_right", "place", "size", "move_by", "slide_in", "slide_out",
         "left", "right", "up", "down", "scale_by", "rotate_by", "char_scale_to", "char_rotate_to"}
 ALPHA = {"fade_in", "fade_out", "bg_fade_in", "bg_fade_out"}
@@ -33,8 +33,8 @@ SHOT = {"shot_to", "shot_zoom", "shot_track", "shot_reset", "shot_focus_to"}
 SHOT_TARGET = "__shot__"
 DEFAULT_EASE = "OutCubic"
 U_STEPS = 24
-MAX_START_FR = 48
-MAX_DURATION_FR = 120
+MAX_START_FR = 2 * FPS    # 시작은 줄 머리부터 2초까지
+MAX_DURATION_FR = 5 * FPS # 길이는 5초까지
 START_SLACK_FR = 1.5      # 줄 머리를 영상 프레임으로 잡아 생기는 늦음(1프레임 안)을 시작이 음수로 흡수한다
 
 
@@ -75,7 +75,7 @@ def fit_progress(t: np.ndarray, v: np.ndarray, w: np.ndarray, table: EaseTable,
                  eases: Optional[Sequence[str]] = None, max_start_fr: int = MAX_START_FR,
                  max_duration_fr: int = MAX_DURATION_FR, prefer: str = DEFAULT_EASE
                  ) -> Tuple[float, float, str, float]:
-    """진행도 표본 v(t) ≈ ease((t − 시작) / 길이)에 (시작, 길이, 이징)을 맞춘다(24fps 격자). → (시작 s, 길이 s, 이징, RMSE)"""
+    """진행도 표본 v(t) ≈ ease((t − 시작) / 길이)에 (시작, 길이, 이징)을 맞춘다(대본의 프레임 격자 — tokens.FPS). → (시작 s, 길이 s, 이징, RMSE)"""
     t = np.asarray(t, np.float64)
     v = np.asarray(v, np.float64)
     w = np.asarray(w, np.float64)
@@ -206,7 +206,7 @@ class TimingMeter:
             di = self.oracle.param_index(c2["name"], "duration")
             if di is not None:
                 if j in live:
-                    _set_arg(c2, di, "24fr")
+                    _set_arg(c2, di, "1s")   # 초로 적는다 — 프레임 기준(24 · 30)과 상관없이 1초
                     _set_arg(c2, self.oracle.param_index(c2["name"], "ease"), "Linear")
                 else:
                     _set_arg(c2, di, "0fr")

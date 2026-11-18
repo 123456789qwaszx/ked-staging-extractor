@@ -25,7 +25,7 @@ from .oracle import Oracle
 
 SETTLE_FRAMES = 3          # 정착 프레임 평균 장수
 SETTLE_LEAD = 0.05         # 다음 줄 머리보다 이만큼 앞에서 끝낸다(초)
-MAX_TIMING_WINDOW = 5.5    # 시간을 잴 때 줄 머리부터 보는 길이(초) — 120fr보다 조금 길게
+MAX_TIMING_WINDOW = 5.5    # 시간을 잴 때 줄 머리부터 보는 길이(초) — 맞추는 길이의 끝(5초)보다 조금 길게
 FLASH_WINDOW = 0.6         # 플래시를 찾는 줄 앞머리(초)
 
 
@@ -120,7 +120,7 @@ def measure_motion(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str
     from .timing import TimingMeter, apply_timing, channels_of
     from .vocab import TransientFinder, apply_findings
     from .effects import EffectDetector, EffectPresets, VignetteMasks
-    from .tokens import parse_duration
+    from .tokens import FPS, parse_duration
     table = EaseTable.load(os.path.join(tuning_dir, "ease-golden.json"))
     presets = EffectPresets.load(tuning_dir)
     meter = TimingMeter(oracle, catalog, observer.painter, observer.mask, table, presets, observer.px_scale)
@@ -147,7 +147,7 @@ def measure_motion(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str
                 continue
             name = "char_visual_clear" if b is None else f"char_visual_{b[0]}"
             try:
-                secs = parse_duration(oracle.param_default(name, "duration") or "6fr")
+                secs = parse_duration(oracle.param_default(name, "duration") or "8fr")
             except ValueError:
                 secs = 0.25
             out[slot_of[c]] = (a, b, secs)
@@ -188,7 +188,7 @@ def measure_motion(video: str, oracle: Oracle, catalog: Catalog, tuning_dir: str
             work[k] = apply_timing(work[k], plans[k], oracle)
             timings[k] = plans[k]
             log(f"  {k:3d} 시간: " + ", ".join(
-                f"{c.target}/{c.kind} {int(round(c.start * 24))}+{int(round(c.duration * 24))}fr {c.ease}"
+                f"{c.target}/{c.kind} {int(round(c.start * FPS))}+{int(round(c.duration * FPS))}fr {c.ease}"
                 for c in plans[k]))
         if vocab:
             # 플래시 — 줄 앞머리에서 화면 전체가 앞 · 뒤 화면보다 확 밝아졌다 사그라드는가(근사 효과).

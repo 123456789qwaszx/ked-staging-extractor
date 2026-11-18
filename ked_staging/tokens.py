@@ -1,6 +1,6 @@
 """시간 · 거리 토큰 — 런타임 YarnDurationParser · UnitToken과 같은 규칙.
 
-- 시간: `12fr`(24fps) · `0.5s` · `0.5`(맨 숫자 = 초)
+- 시간: `12fr`(30fps — 런타임 DurationToken.FramesPerSecond, 2026-11-18 24fps에서 바꿈) · `0.5s` · `0.5`(맨 숫자 = 초)
 - 거리: `3u` · `3`(맨 숫자 = u), 1u = 기준 무대 폭 / 48 (1920 → 40px)
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import re
 
-FPS = 24
+FPS = 30
 UNITS_PER_STAGE_WIDTH = 48
 DEFAULT_STAGE_WIDTH = 1920.0
 
@@ -26,7 +26,7 @@ def parse_duration(token: str) -> float:
 
 
 def frames(seconds: float) -> int:
-    """초 → 가장 가까운 24fps 프레임 수(0 이상)."""
+    """초 → 가장 가까운 FPS 프레임 수(0 이상)."""
     return max(0, int(round(seconds * FPS)))
 
 

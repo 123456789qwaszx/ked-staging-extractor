@@ -23,8 +23,8 @@ class InverseTests(unittest.TestCase):
         head, lines = self.script(stage("class_day"), stage("class_day", slot("harin", "right")))
         self.assertEqual(head, ["<<shot_reset 0fr>>", "<<bg_spawn bg_main class_day>>",
                                 "<<slot s1 stage00 mid>>", "<<cast s1 harin a 1>>"])
-        self.assertEqual(lines[0], ["<<bg_fade_in bg_main 24fr>>"])
-        self.assertEqual(lines[1], ["<<place_right s1 bust 0fr>>", "<<size s1 mid bust 0fr>>", "<<fade_in s1 18fr>>"])
+        self.assertEqual(lines[0], ["<<bg_fade_in bg_main 30fr>>"])
+        self.assertEqual(lines[1], ["<<place_right s1 bust 0fr>>", "<<size s1 mid bust 0fr>>", "<<fade_in s1 23fr>>"])
 
     def test_changes_while_visible(self):
         a = slot("harin", "left")
@@ -36,17 +36,17 @@ class InverseTests(unittest.TestCase):
             stage("x", slot("harin", "center", emotion="03", depth="front", mirror=True)),     # 자리 · 반전
             stage("y"))
         self.assertEqual(lines[1], ["<<face s1 3>>"])
-        self.assertEqual(lines[2], ["<<move_by s1 -2u 0u 12fr>>"])
+        self.assertEqual(lines[2], ["<<move_by s1 -2u 0u 15fr>>"])
         # 이동이 남은 채로 크기만 바꾸면 처음 세운 자리와 달라진다 → 다시 세운다
-        self.assertEqual(lines[3], ["<<place_left s1 bust 12fr>>", "<<size s1 front bust 12fr>>",
-                                    "<<move_by s1 -2u 0u 12fr>>"])
-        self.assertEqual(lines[4], ["<<mirror s1 left>>", "<<place_center s1 bust 12fr>>"])
-        self.assertEqual(lines[5], ["<<bg_sprite bg_main y>>", "<<fade_out s1 18fr>>"])
+        self.assertEqual(lines[3], ["<<place_left s1 bust 15fr>>", "<<size s1 front bust 15fr>>",
+                                    "<<move_by s1 -2u 0u 15fr>>"])
+        self.assertEqual(lines[4], ["<<mirror s1 left>>", "<<place_center s1 bust 15fr>>"])
+        self.assertEqual(lines[5], ["<<bg_sprite bg_main y>>", "<<fade_out s1 23fr>>"])
 
     def test_reappear_with_new_variant(self):
         _, lines = self.script(stage(None, slot("sigure")), stage(None), stage(None, slot("sigure", variant="b", emotion="02")))
-        self.assertEqual(lines[1], ["<<fade_out s1 18fr>>"])
-        self.assertEqual(lines[2], ["<<pose s1 b>>", "<<face s1 2>>", "<<fade_in s1 18fr>>"])
+        self.assertEqual(lines[1], ["<<fade_out s1 23fr>>"])
+        self.assertEqual(lines[2], ["<<pose s1 b>>", "<<face s1 2>>", "<<fade_in s1 23fr>>"])
 
     def test_yarn_text_escapes(self):
         self.assertEqual(yarn_text("a #b {c}\n d // e"), "a \\#b \\{c\\} d /\\/ e")

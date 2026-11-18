@@ -27,7 +27,10 @@ SLIDE_HINT_GAIN = 0.15      # 대표 슬라이드가 오차를 이만큼이라�
 ACCEPT_GAIN = 0.3           # 후보가 오차를 이 비율 이상 줄여야 받아들인다
 SLIDE_DIRECTIONS = ("left", "right")
 SLIDE_DISTANCES = (1, 2, 3, 4, 6, 8, 12)
-MOTION_STARTS_FR = range(0, 25, 3)
+SLIDE_FRAMES = (10, 15, 20, 25)     # 슬라이드 길이의 거친 후보(30fps — 1/3 · 1/2 · 2/3 · 5/6초)
+FADE_DEFAULT_FR = 18                # fade_in · fade_out 길이 생략값 사본(런타임 StageCommandParser.Table, 30fps)
+FADE_DEFAULT_TOKEN = f"{FADE_DEFAULT_FR}fr"
+MOTION_STARTS_FR = range(0, 31, 3)   # 0~1초(30fps), 3프레임 간격
 
 
 @dataclass
@@ -160,7 +163,7 @@ class TransientFinder:
         fade = next((c for c in line if c["name"] == fade_name and c["args"][:1] == [key]), None)
         if fade is None:
             return False
-        dur = fade["args"][1] if len(fade["args"]) > 1 else "14fr"
+        dur = fade["args"][1] if len(fade["args"]) > 1 else FADE_DEFAULT_TOKEN
         total0 = float(np.clip(base_e - floor, 0, None).sum())
         for d in SLIDE_DIRECTIONS:
             cand = self._insert(line, [{"name": kind, "args": [key, d, "4u", dur]}], kind)
@@ -184,11 +187,11 @@ class TransientFinder:
         fi = next((i for i, c in enumerate(line) if c["name"] == fade_name and c["args"][:1] == [key]), None)
         if fi is None:
             return None
-        cur = line[fi]["args"][1] if len(line[fi]["args"]) > 1 else "14fr"
+        cur = line[fi]["args"][1] if len(line[fi]["args"]) > 1 else FADE_DEFAULT_TOKEN
         try:
-            cur_fr = int(round(float(cur[:-2]))) if cur.endswith("fr") else 14
+            cur_fr = int(round(float(cur[:-2]))) if cur.endswith("fr") else FADE_DEFAULT_FR
         except ValueError:
-            cur_fr = 14
+            cur_fr = FADE_DEFAULT_FR
 
         # 시간 재기가 페이드 앞에 끼운 대기는 슬라이드가 섞인 투명도를 잘못 잰 것일 수 있다 — 페이드를 줄 머리 무리로 옮긴다.
         rest = [copy.deepcopy(c) for i, c in enumerate(line) if i != fi]
@@ -204,7 +207,7 @@ class TransientFinder:
         def cost(cand: List[dict]) -> float:
             return float(np.clip(self._errors(history, cand, frames, {key: region})[key] - floor, 0, None).sum())
 
-        coarse = sorted({cur_fr, 8, 12, 16, 20})
+        coarse = sorted({cur_fr, *SLIDE_FRAMES})
         best = None
         for d in SLIDE_DIRECTIONS:
             for dist in SLIDE_DISTANCES:

@@ -9,7 +9,8 @@
 
 자리는 관측이 이미 어휘(place × focus × size)로 골라 두었다. place는 그 순간 크기와 상관없이 focus를 화면 지점에
 세우고 size는 focus를 지키며 키우므로, 앞 상태가 어떻든 place → size 두 줄이면 같은 자리에 선다(그 뒤 move_by).
-시간 인자는 P1에서 생략값이다 — 숨어 있을 때 바꾸는 자리는 0fr, 보이는 채로 바꾸면 12fr, 등 · 퇴장은 18fr.
+시간 인자는 P1에서 생략값이다 — 숨어 있을 때 바꾸는 자리는 0fr, 보이는 채로 바꾸면 15fr(0.5초), 등 · 퇴장은 23fr(약 0.77초),
+배경 페이드는 30fr(1초). 프레임은 30fps다(2026-11-18 24fps의 12 · 18 · 24fr에서 같은 초로 옮김).
 """
 from __future__ import annotations
 
@@ -20,10 +21,10 @@ from .observe import ObservedSlot, ObservedStage, emotion_arg
 from .tokens import unit_token
 
 BG_KEY = "bg_main"
-APPEAR = "18fr"
-MOVE = "12fr"
+APPEAR = "23fr"
+MOVE = "15fr"
 SNAP = "0fr"
-BG_FADE = "24fr"
+BG_FADE = "30fr"
 
 
 def _cmd(name: str, *args) -> dict:

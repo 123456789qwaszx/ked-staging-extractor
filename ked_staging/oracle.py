@@ -15,6 +15,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from .tokens import FPS
+
 PROTOCOL = "2"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_HERE)
@@ -93,6 +95,23 @@ class Oracle:
         self.width = float(info["width"])
         self.height = float(info["height"])
         self.problems: List[str] = list(info.get("problems", []))
+        self._check_frames()
+
+    def _check_frames(self) -> None:
+        """오라클이 프레임을 추출기와 같은 fps로 세는가 — `pause {FPS}fr`가 1초여야 한다.
+
+        다르면 추출기가 낸 `Nfr`을 오라클이 다른 길이로 접어 시간 재기 · 어휘 찾기 · 평가가 조용히 어긋난다
+        (런타임은 2026-11-18 24fps에서 30fps로 바꿨다 — 오라클은 컴포지터의 코어 사본을 따른다)."""
+        res = self.request({"op": "timeline", "lines": [{"commands": [{"name": "pause", "args": [f"{FPS}fr"]}]}],
+                            "times": [0.0]})
+        pause = next((e for e in res.get("schedule", []) if e.get("name") == "pause"), None)
+        seconds = float(pause["duration"]) if pause else 0.0
+        if abs(seconds - 1.0) > 1e-3:
+            self.close()
+            oracle_fps = f"{FPS / seconds:g}fps" if seconds > 0 else "알 수 없음"
+            raise OracleError(
+                f"오라클의 프레임 기준이 다릅니다: `pause {FPS}fr`가 {seconds:g}초(오라클 {oracle_fps}, 추출기 {FPS}fps). "
+                "ked-story-compositor의 코어 사본을 런타임에서 다시 들여 오라클을 다시 빌드하세요.")
 
     def _drain_stderr(self) -> None:
         for line in self._proc.stderr:  # type: ignore[union-attr]
@@ -164,7 +183,7 @@ class Oracle:
         return None
 
     def param_default(self, command: str, type_name: str) -> Optional[str]:
-        """command의 type_name 파라미터 생략값(예: char_visual_clear의 duration → "6fr")."""
+        """command의 type_name 파라미터 생략값(예: char_visual_clear의 duration → "8fr")."""
         i = self.param_index(command, type_name)
         if i is None:
             return None

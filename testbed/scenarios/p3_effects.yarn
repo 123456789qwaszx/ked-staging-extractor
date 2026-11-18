@@ -8,33 +8,33 @@ title: P3_Effects
 <<slot s2 stage00 mid>>
 <<cast s2 sigure a 1>>
 
-<<bg_fade_in bg_main 24fr>>
+<<bg_fade_in bg_main 30fr>>
 점심시간이 끝나 갈 무렵이었다.
 
 <<place_left s1 bust 0fr>>
 <<size s1 mid bust 0fr>>
-<<fade_in s1 12fr>>
+<<fade_in s1 15fr>>
 <<place_right s2 bust 0fr>>
 <<size s2 mid bust 0fr>>
-<<fade_in s2 12fr>>
+<<fade_in s2 15fr>>
 하린: 시구레, 아까 그 얘기 말인데.
 
-<<char_visual_dim s2 1 6fr>>
+<<char_visual_dim s2 1 8fr>>
 하린: 사실 나도 잘 모르겠어.
 
 <<char_visual_clear s2>>
-<<char_visual_silhouette s1 1 6fr>>
+<<char_visual_silhouette s1 1 8fr>>
 시구레: 그럼 같이 알아봐요.
 
 <<char_visual_clear s1>>
-<<screen_vignette tension 1 8fr>>
+<<screen_vignette tension 1 10fr>>
 하린: 그런데 누가 보고 있는 것 같지 않아?
 
 <<screen_flash soft 1>>
 시구레: 앗, 방금 번쩍했어요!
 
 <<screen_vignette_clear>>
-<<screen_noise memory 1 8fr>>
+<<screen_noise memory 1 10fr>>
 하린: 어제도 이런 일이 있었던 것 같은데…
 
 <<screen_noise_clear>>
@@ -42,11 +42,11 @@ title: P3_Effects
 시구레: 창밖이 뿌옇게 보여요.
 
 <<screen_blur_reset>>
-<<char_visual_defocus s1 1 10fr>>
+<<char_visual_defocus s1 1 13fr>>
 하린: 잠깐 생각 좀 할게.
 
 <<char_visual_clear s1>>
-<<fade_out s1 12fr>>
-<<fade_out s2 12fr>>
+<<fade_out s1 15fr>>
+<<fade_out s2 15fr>>
 두 사람은 그렇게 교실을 나섰다.
 ===

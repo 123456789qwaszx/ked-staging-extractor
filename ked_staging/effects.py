@@ -205,11 +205,11 @@ class EffectState:
                 s = float(a[1]) if len(a) > 1 else 1.0
                 cur = self.visual.get(a[0])
                 start = cur.value(head) if cur and cur.key == key else 0.0
-                self.visual[a[0]] = _Ramp(key, s, start, head, dur(a[2] if len(a) > 2 else None, "6fr"))
+                self.visual[a[0]] = _Ramp(key, s, start, head, dur(a[2] if len(a) > 2 else None, "8fr"))
             elif n == "char_visual_clear" and a:
                 cur = self.visual.get(a[0])
                 if cur:
-                    self.visual[a[0]] = _Ramp(cur.key, 0.0, cur.value(head), head, dur(a[1] if len(a) > 1 else None, "6fr"))
+                    self.visual[a[0]] = _Ramp(cur.key, 0.0, cur.value(head), head, dur(a[1] if len(a) > 1 else None, "8fr"))
             elif n == "screen_vignette" and a:
                 s = float(a[1]) if len(a) > 1 else 1.0
                 self.vignette = _Ramp(a[0], s, 0.0 if not self.vignette or self.vignette.key != a[0] else self.vignette.value(head),

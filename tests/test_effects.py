@@ -47,9 +47,9 @@ class CommandTests(unittest.TestCase):
 
     def test_state_ramps(self):
         st = EffectState()
-        st.apply_commands([{"name": "char_visual_dim", "args": ["s1", "1", "6fr"]},
+        st.apply_commands([{"name": "char_visual_dim", "args": ["s1", "1", "8fr"]},
                            {"name": "screen_vignette", "args": ["tension", "1", "8fr"]}], head=1.0)
-        self.assertAlmostEqual(st.visual["s1"].value(1.0 + 3 / 24), 0.5, places=3)
+        self.assertAlmostEqual(st.visual["s1"].value(1.0 + 4 / 30), 0.5, places=3)
         self.assertEqual(st.vignette.value(5.0), 1.0)
         st.apply_commands([{"name": "char_visual_clear", "args": ["s1"]}, {"name": "screen_vignette_clear", "args": []}],
                           head=5.0)

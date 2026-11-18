@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .oracle import Oracle, Snapshot, route_lines
+from .tokens import FPS
 
 STATE_PASS = 0.95
 
@@ -166,7 +167,7 @@ def _tweens(schedule: Sequence[dict], before: Snapshot, after: Snapshot) -> Dict
 
 
 def evaluate_timing(truth: dict, staging: dict, oracle: Oracle, tolerance_frames: float = 2.0) -> dict:
-    fps = 24.0
+    fps = float(FPS)
     truth_lines = truth["lines"]
     if not all("schedule" in l for l in truth_lines):
         raise ValueError("정답에 시간표가 없습니다 — 시험 녹화를 오라클 시간 축으로 만드세요(scenario --timed)")

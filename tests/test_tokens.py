@@ -5,14 +5,16 @@ from ked_staging import tokens
 
 class TokenTests(unittest.TestCase):
     def test_duration_forms(self):
-        self.assertAlmostEqual(tokens.parse_duration("24fr"), 1.0)
+        self.assertEqual(tokens.FPS, 30)   # 런타임 DurationToken.FramesPerSecond(2026-11-18 24에서 바꿈)
+        self.assertAlmostEqual(tokens.parse_duration("30fr"), 1.0)
+        self.assertAlmostEqual(tokens.parse_duration("15fr"), 0.5)
         self.assertAlmostEqual(tokens.parse_duration("0.5s"), 0.5)
         self.assertAlmostEqual(tokens.parse_duration("0.5"), 0.5)   # 맨 숫자 = 초
         with self.assertRaises(ValueError):
             tokens.parse_duration("fast")
 
     def test_duration_token_is_frames(self):
-        self.assertEqual(tokens.duration_token(0.75), "18fr")
+        self.assertEqual(tokens.duration_token(0.6), "18fr")
         self.assertEqual(tokens.duration_token(0.0), "0fr")
         self.assertEqual(tokens.duration_token(-1), "0fr")
 

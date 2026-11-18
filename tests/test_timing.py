@@ -7,6 +7,7 @@ import numpy as np
 
 from ked_staging.ease import EaseTable
 from ked_staging.timing import Channel, apply_timing, fit_progress
+from ked_staging.tokens import FPS
 from tests.support import GOLDEN, MOTIONS, REPO, RUNTIME, TUNING, needs_oracle, needs_runtime
 
 SCENARIO = os.path.join(REPO, "testbed", "scenarios", "p2_timing.yarn")
@@ -21,24 +22,24 @@ class FitTests(unittest.TestCase):
     def check(self, ease, start_fr, dur_fr, lag=0.004, noise=0.004):
         rng = np.random.default_rng(start_fr * 100 + dur_fr)
         t = np.arange(0, 2.5, 1 / 30) + lag
-        p = np.clip((t - start_fr / 24) / (dur_fr / 24), 0, 1)
+        p = np.clip((t - start_fr / FPS) / (dur_fr / FPS), 0, 1)
         v = self.table.evaluate(ease, p) + rng.normal(0, noise, len(t))
         s, d, e, rmse = fit_progress(t - lag, v, np.ones(len(t)), self.table)
-        self.assertLessEqual(abs(d * 24 - dur_fr), 1.0, (ease, d * 24))
-        self.assertLessEqual(abs(s * 24 - start_fr), 1.0, (ease, s * 24))
+        self.assertLessEqual(abs(d * FPS - dur_fr), 1.0, (ease, d * FPS))
+        self.assertLessEqual(abs(s * FPS - start_fr), 1.0, (ease, s * FPS))
         self.assertEqual(e, ease)
         self.assertLess(rmse, 0.02)
 
     def test_recovers_common_eases(self):
-        for ease, start, dur in [("OutCubic", 0, 12), ("InOutSine", 0, 20), ("Linear", 6, 16), ("OutBack", 0, 30),
-                                 ("InOutQuad", 12, 24), ("OutQuart", 0, 18)]:
+        for ease, start, dur in [("OutCubic", 0, 15), ("InOutSine", 0, 25), ("Linear", 8, 20), ("OutBack", 0, 38),
+                                 ("InOutQuad", 15, 30), ("OutQuart", 0, 23)]:
             self.check(ease, start, dur)
 
     def test_fixed_ease_for_fades(self):
         t = np.arange(0, 1.5, 1 / 30)
-        v = self.table.evaluate("OutCubic", np.clip(t / (14 / 24), 0, 1))
+        v = self.table.evaluate("OutCubic", np.clip(t / (18 / FPS), 0, 1))
         s, d, e, _ = fit_progress(t, v, np.ones(len(t)), self.table, ["OutCubic"])
-        self.assertEqual((round(s * 24), round(d * 24), e), (0, 14, "OutCubic"))
+        self.assertEqual((round(s * FPS), round(d * FPS), e), (0, 18, "OutCubic"))
 
 
 class _FakeOracle:
@@ -52,23 +53,23 @@ class _FakeOracle:
 class ApplyTests(unittest.TestCase):
     def test_durations_eases_and_waits(self):
         line = [{"name": "face", "args": ["s1", "2"]},
-                {"name": "place_left", "args": ["s1", "bust", "12fr"]},
-                {"name": "size", "args": ["s1", "front", "bust", "12fr"]},
-                {"name": "fade_in", "args": ["s2", "18fr"]}]
-        move = Channel("s1", "move", [1, 2], 0.0, 20 / 24, "InOutSine", 0.01)
-        fade = Channel("s2", "alpha", [3], 12 / 24, 16 / 24, "OutCubic", 0.01)
+                {"name": "place_left", "args": ["s1", "bust", "15fr"]},
+                {"name": "size", "args": ["s1", "front", "bust", "15fr"]},
+                {"name": "fade_in", "args": ["s2", "23fr"]}]
+        move = Channel("s1", "move", [1, 2], 0.0, 25 / FPS, "InOutSine", 0.01)
+        fade = Channel("s2", "alpha", [3], 15 / FPS, 20 / FPS, "OutCubic", 0.01)
         out = apply_timing(line, [move, fade], _FakeOracle())
         self.assertEqual(out, [
             {"name": "face", "args": ["s1", "2"]},
-            {"name": "place_left", "args": ["s1", "bust", "20fr", "InOutSine"]},
-            {"name": "size", "args": ["s1", "front", "bust", "20fr", "InOutSine"]},
-            {"name": "pause", "args": ["12fr"]},
-            {"name": "fade_in", "args": ["s2", "16fr"]}])
+            {"name": "place_left", "args": ["s1", "bust", "25fr", "InOutSine"]},
+            {"name": "size", "args": ["s1", "front", "bust", "25fr", "InOutSine"]},
+            {"name": "pause", "args": ["15fr"]},
+            {"name": "fade_in", "args": ["s2", "20fr"]}])
 
     def test_default_ease_is_left_out(self):
-        line = [{"name": "place_left", "args": ["s1", "bust", "12fr", "OutBack"]}]
+        line = [{"name": "place_left", "args": ["s1", "bust", "15fr", "OutBack"]}]
         out = apply_timing(line, [Channel("s1", "move", [0], 0.0, 0.5, "OutCubic", 0.01)], _FakeOracle())
-        self.assertEqual(out[0]["args"], ["s1", "bust", "12fr"])
+        self.assertEqual(out[0]["args"], ["s1", "bust", "15fr"])
 
 
 @needs_oracle

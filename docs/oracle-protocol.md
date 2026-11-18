@@ -23,6 +23,10 @@ ked-stage-oracle selftest --tuning <dir> [--motions <file>] <file.yarn>...
 | `timeline` | `lines[…]`(fold와 같다), `line`(기본 마지막), `times[]`(그 줄 머리부터 초) | `schedule[]` · `end` · `snapshots[]`(times마다, `time` 포함) |
 | `commands` | — | `commands[{id, name, parameters[{name, type, required, default}]}]` — 컴포지터 기본 카탈로그 |
 
+**프레임 기준**: 추출기는 `ping` 뒤에 `timeline`으로 `pause 30fr` 한 줄을 묻고, 그 `duration`이 1초가 아니면 오라클을 닫고 멈춘다
+(`Oracle._check_frames`). 대본의 `Nfr`은 30fps다(런타임 2026-11-18, 그 전 24fps) — 오라클은 컴포지터가 반입한 코어 사본의
+`DurationToken`을 따르므로, 사본이 옛 판이면 다시 들여 빌드한다.
+
 **2 (P2)**: `timeline` · `commands`가 생겼다. 1과 응답 모양은 같고 op만 늘었지만, 추출기가 버전을 확인하므로
 오라클을 다시 빌드해야 한다.
 
@@ -71,10 +75,10 @@ ked-stage-oracle selftest --tuning <dir> [--motions <file>] <file.yarn>...
 
 ```json
 "schedule": [
-  {"index": 0, "name": "place_left", "args": ["s1","bust","20fr","InOutSine"], "start": 0, "duration": 0.8333,
+  {"index": 0, "name": "place_left", "args": ["s1","bust","25fr","InOutSine"], "start": 0, "duration": 0.8333,
    "ease": "InOutSine", "wait": false, "tween": true, "fade": false},
-  {"index": 4, "name": "pause", "args": ["12fr"], "start": 0, "duration": 0.5, "ease": null, "wait": true, ...},
-  {"index": 5, "name": "fade_in", "args": ["s3","20fr"], "start": 0.5, "duration": 0.8333, "ease": "OutCubic", "fade": true, ...}
+  {"index": 4, "name": "pause", "args": ["15fr"], "start": 0, "duration": 0.5, "ease": null, "wait": true, ...},
+  {"index": 5, "name": "fade_in", "args": ["s3","25fr"], "start": 0.5, "duration": 0.8333, "ease": "OutCubic", "fade": true, ...}
 ]
 ```
 
